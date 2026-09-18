@@ -2,7 +2,7 @@
 
 Trình phát video cục bộ cho bo **xingzhi-cube-1.54tft-wifi** (ESP32-S3, LCD ST7789 240×240, âm thanh I²S).
 
-> Trạng thái: giai đoạn nghiên cứu phần cứng và lập kế hoạch. Chưa có firmware và chưa tuyên bố đã build/chạy trên bo thật.
+> Trạng thái: đã phân tích dự án mẫu hoạt động và bổ sung firmware Arduino cải tiến. Bản cải tiến chưa được build/flash trên bo thật trong môi trường hiện tại.
 
 ## Mục tiêu
 
@@ -14,15 +14,15 @@ Trình phát video cục bộ cho bo **xingzhi-cube-1.54tft-wifi** (ESP32-S3, LC
 
 ## Kết luận khả thi
 
-Có thể biến bo thành thiết bị phát video độ phân giải thấp, nhưng không nên kỳ vọng MP4/H.264 như điện thoại. Phương án khuyến nghị là **Motion JPEG (MJPEG) + PCM mono trong AVI**, được chuyển mã trước trên PC. Mục tiêu ban đầu: 240×240, 12–15 fps, JPEG quality 8–12, PCM 16-bit mono 24 kHz.
+Bo có thể phát video MJPEG 240×240 kèm WAV. Dự án mẫu đã xác nhận thẻ TF chạy trên SPI riêng: MISO GPIO1, MOSI GPIO2, SCK GPIO3 và CS được sketch khai báo GPIO46. Audio I²S dùng BCLK GPIO15, LRCK GPIO16, DOUT GPIO7.
 
-Bo mạch có ESP32-S3 N16R8 (16 MB flash, 8 MB PSRAM), LCD ST7789 240×240 và ngõ âm thanh I²S. Tuy nhiên, nguồn chính thức đang dùng không khai báo giao tiếp thẻ TF tích hợp. Cần xác minh revision PCB và điểm hàn/chân mở rộng trước khi chốt sơ đồ kết nối thẻ. Nếu không có khe TF thật, cần module microSD 3,3 V ngoài.
+Bản Arduino tương thích với cách vận hành mẫu dùng cặp file `.mjpeg` + `.wav`, mặc định 15 fps và PCM mono 24 kHz. Hướng phát triển dài hạn vẫn là AVI chứa MJPEG + PCM để có timestamp/container thống nhất. Không khuyến nghị MP4/H.264 vì ESP32-S3 không có phần cứng giải mã H.264.
 
 ## Tài liệu
 
 - [Mô tả phần cứng và cấu hình GPIO](docs/HARDWARE.md)
 - [Kiến trúc và kế hoạch phát triển](docs/VIDEO_PLAYER_PLAN.md)
-- [Quy ước media và danh sách phát](docs/MEDIA_FORMAT.md)
+- [Quy ước media và danh sách phát](docs/MEDIA_FORMAT.md)\n- [Đánh giá dự án mẫu và nguyên nhân audio kém](docs/SAMPLE_PROJECT_REVIEW.md)\n- [Firmware Arduino cải tiến](firmware/videoPlayer/videoPlayer.ino)\n- [Cấu hình TFT_eSPI](firmware/videoPlayer/User_Setup_Xingzhi.h)
 
 ## Nguồn chính
 
