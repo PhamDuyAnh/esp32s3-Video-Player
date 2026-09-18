@@ -8,7 +8,7 @@ Nguồn ưu tiên:
 
 1. `config.h`, file khởi tạo bo và `power_manager.h` trong dự án [78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32/tree/main/main/boards/nologo/xingzhi-cube-1.54tft-wifi).
 2. [FAQ chính thức của Nologo](https://www.nologo.tech/product/esp32/esp32s3/esp32s3ai/esp32s3xiaozhi/esp32s3ai_qa.html).
-3. Tài liệu ESP32-S3 của Espressif.
+3. [Cấu hình xingzhi-cube của TienHuyIoT](https://github.com/TienHuyIoT/xiaozhi-esp32_vietnam/blob/develop_vn/main/boards/xingzhi-cube-1.54tft-wifi/config.h), có khai báo đầy đủ SD/TF.\n4. Tài liệu ESP32-S3 của Espressif.\n\nCấu hình [zhengchen/1.54tft-wifi](https://github.com/PhamDuyAnh/XiaoZhi-esp32/blob/main/main/boards/zhengchen/1.54tft-wifi/config.h) dùng pinout LCD/nút khác và **không áp dụng** cho target của dự án này.
 
 Các chân dưới đây đã được firmware bo chính thức sử dụng. Chúng phản ánh cấu hình phần mềm hiện hành, không thay thế schematic/PCB revision của nhà sản xuất.
 
