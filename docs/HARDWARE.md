@@ -28,13 +28,13 @@ Các chân dưới đây đã được firmware bo chính thức sử dụng. Ch
 | Nguồn di động | Pin Li-ion/LiPo 300 mAh trong bộ kit | FAQ nêu khoảng 1,5 giờ với firmware AI + TFT; video có thể ngắn hơn |
 | USB | Nguồn, nạp firmware/USB của ESP32-S3 | Cần xác minh cổng và chế độ USB/JTAG trên revision thực tế |
 | Nút | Boot, Volume+, Volume−; nút nguồn/reset bên hông | Chức năng ứng dụng có thể ánh xạ lại |
-| Thẻ TF/microSD | **Chưa xác minh có khe tích hợp** | Firmware bo chính thức không khai báo SDMMC/SDSPI hoặc chân CS của thẻ |
+| Thẻ TF/microSD | SPI riêng: MISO 1, MOSI 2, SCK 3, CS được sketch mẫu khai báo 46 | Dự án mẫu do người dùng cung cấp đã phát được video từ thẻ |
 
 ## 3. Bảng GPIO đã xác minh từ firmware tham chiếu
 
 | GPIO | Chức năng | Hướng/ngoại vi | Lưu ý cho dự án |
 |---:|---|---|---|
-| 0 | BOOT / nút giữa | Input, pull-up | Strapping pin; không dùng cho SD |
+| 0 | BOOT / nút giữa | Input, pull-up | Strapping pin; không dùng cho SD |\n| 1 | TF/SD MISO | Input, SPI | Xác nhận từ dự án mẫu hoạt động |\n| 2 | TF/SD MOSI | Output, SPI | Xác nhận từ dự án mẫu hoạt động |\n| 3 | TF/SD SCK | Output, SPI | Xác nhận từ dự án mẫu hoạt động |
 | 4 | I²S microphone WS | Output | Đang dành cho microphone |
 | 5 | I²S microphone SCK | Output | Đang dành cho microphone |
 | 6 | I²S microphone DIN | Input | Dữ liệu microphone |
@@ -81,23 +81,28 @@ Firmware tham chiếu gọi thiết bị là `NoAudioCodecSimplex`: không thấ
 
 ### Dữ liệu đã biết
 
-Trong cấu hình bo chính thức không có khai báo chân SDMMC/SDSPI. Vì thế chưa có bằng chứng phần mềm rằng biến thể này chứa khe thẻ TF có dây sẵn.
+Dự án mẫu do người dùng cung cấp đã đọc và phát MJPEG từ thẻ bằng một bus SPI riêng:
 
-### Không được tự quyết định trước khi kiểm tra bo thật
+- MISO: GPIO1.
+- MOSI: GPIO2.
+- SCK: GPIO3.
+- CS được sketch khai báo: GPIO46.
+- Tần số yêu cầu: 40 MHz.
 
-- Không gán một GPIO “còn trống” chỉ dựa trên danh sách trên.
+Bus thẻ tách khỏi bus LCD (GPIO9/10), thuận lợi cho pipeline video.
+
+### Điểm cần xác minh riêng đối với GPIO46
+
+GPIO46 có các hạn chế đặc biệt/strapping trên ESP32-S3. Dù sketch mẫu khai báo GPIO46 làm SD CS và hệ thống thực tế đã phát được video, cần xác định trên schematic/revision bo liệu chân này là CS chủ động, card-detect, được kéo cứng hay đi qua mạch trung gian. Không suy rộng cấu hình này sang bo khác.
+
+### Điều kiện sử dụng
+
+- Giữ đúng bus riêng GPIO1/2/3 của bo đã thử nghiệm.
+- Khởi đầu ở 20 MHz khi chẩn đoán; chỉ nâng 40 MHz sau khi đọc ổn định.
 - Không cấp 5 V logic vào ESP32-S3 hoặc thẻ microSD.
-- Không dùng module microSD có level shifter chậm nếu muốn tốc độ video cao.
-- Không dùng GPIO 19/20 trước khi xác định có ảnh hưởng USB D−/D+ hay không.
-- Không dùng GPIO 26–37 nếu module N16R8 sử dụng chúng cho flash/PSRAM.
-
-### Phương án khuyến nghị
-
-1. Kiểm tra mặt trước/sau PCB, mã revision và vị trí khe/cổng FPC/test pad.
-2. Nếu có khe TF: truy vết hoặc đo continuity từ các tiếp điểm `CLK/CMD/D0..D3` hay `SCK/MOSI/MISO/CS` tới ESP32-S3.
-3. Nếu không có khe: dùng module microSD 3,3 V ngoài.
-4. Ưu tiên SDSPI chia sẻ `SCLK=GPIO9` và `MOSI=GPIO10` với LCD, bổ sung MISO và CS riêng **chỉ khi** schematic/revision xác nhận có chân vật lý phù hợp. LCD CS và SD CS phải luôn loại trừ lẫn nhau.
-5. Nếu không thể chia sẻ SPI hoặc không có GPIO ra ngoài, dự án “phát từ thẻ” cần đổi phần cứng, thêm PCB adapter, hoặc dùng flash nội bộ với dung lượng media rất hạn chế.
+- Mount read-only trong ứng dụng phát video.
+- Không thay đổi GPIO46 hoặc chế độ boot trước khi có schematic/đo logic.
+- Nếu dùng revision PCB khác, phải xác nhận continuity và mức CS trước khi cắm thẻ có dữ liệu quan trọng.
 
 ## 5. Nguồn và an toàn
 
