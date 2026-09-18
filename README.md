@@ -2,7 +2,7 @@
 
 Trình phát video cục bộ cho bo **xingzhi-cube-1.54tft-wifi** (ESP32-S3, LCD ST7789 240×240, âm thanh I²S).
 
-> Trạng thái: đã phân tích dự án mẫu hoạt động và bổ sung firmware Arduino cải tiến. Bản cải tiến chưa được build/flash trên bo thật trong môi trường hiện tại.
+> Trạng thái 2026-09-18: đã nhận dạng bo tại COM9 là ESP32-S3 revision 0.2 với flash 16 MB, sao lưu đủ flash và build thành công firmware hardware self-test. Chưa có kết quả kiểm tra LCD, nút, thẻ, audio, microphone hoặc player trên bo; xem [báo cáo thiết bị](docs/DEVICE_TEST_REPORT.md).
 
 ## Mục tiêu
 
@@ -20,6 +20,8 @@ Bản Arduino tương thích với cách vận hành mẫu dùng cặp file `.mj
 
 ## Tài liệu
 
+- [Build trong VSCode hoặc PowerShell](docs/BUILD.md)
+- [Báo cáo thử thiết bị COM9](docs/DEVICE_TEST_REPORT.md)
 - [Mô tả phần cứng và cấu hình GPIO](docs/HARDWARE.md)\n- [Đối chiếu hai cấu hình XiaoZhi và pinout được chọn](docs/GPIO_CROSSCHECK.md)
 - [Kiến trúc và kế hoạch phát triển](docs/VIDEO_PLAYER_PLAN.md)
 - [Quy ước media và danh sách phát](docs/MEDIA_FORMAT.md)\n- [Đánh giá dự án mẫu và nguyên nhân audio kém](docs/SAMPLE_PROJECT_REVIEW.md)\n- [Firmware Arduino cải tiến](firmware/videoPlayer/videoPlayer.ino)\n- [Cấu hình TFT_eSPI](firmware/videoPlayer/User_Setup_Xingzhi.h)\n- [Nhiệm vụ Codex: kiểm tra COM9 và nạp thử](CODEX_DEVICE_TEST_TASK.md)
