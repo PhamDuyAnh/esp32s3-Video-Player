@@ -1,0 +1,5 @@
+﻿.device-backups/
+.build/
+.pio/
+videoConverter/input_videos/
+videoConverter/output_sd/

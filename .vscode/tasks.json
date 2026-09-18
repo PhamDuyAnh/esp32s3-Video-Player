@@ -1,0 +1,21 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Xingzhi self-test",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/build.ps1", "-Sketch", "selfTest"],
+      "group": "build",
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Build Xingzhi player",
+      "type": "shell",
+      "command": "powershell",
+      "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/build.ps1", "-Sketch", "videoPlayer"],
+      "group": "build",
+      "problemMatcher": ["$gcc"]
+    }
+  ]
+}
