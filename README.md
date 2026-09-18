@@ -20,9 +20,9 @@ Bản Arduino tương thích với cách vận hành mẫu dùng cặp file `.mj
 
 ## Tài liệu
 
-- [Mô tả phần cứng và cấu hình GPIO](docs/HARDWARE.md)
+- [Mô tả phần cứng và cấu hình GPIO](docs/HARDWARE.md)\n- [Đối chiếu hai cấu hình XiaoZhi và pinout được chọn](docs/GPIO_CROSSCHECK.md)
 - [Kiến trúc và kế hoạch phát triển](docs/VIDEO_PLAYER_PLAN.md)
-- [Quy ước media và danh sách phát](docs/MEDIA_FORMAT.md)\n- [Đánh giá dự án mẫu và nguyên nhân audio kém](docs/SAMPLE_PROJECT_REVIEW.md)\n- [Firmware Arduino cải tiến](firmware/videoPlayer/videoPlayer.ino)\n- [Cấu hình TFT_eSPI](firmware/videoPlayer/User_Setup_Xingzhi.h)
+- [Quy ước media và danh sách phát](docs/MEDIA_FORMAT.md)\n- [Đánh giá dự án mẫu và nguyên nhân audio kém](docs/SAMPLE_PROJECT_REVIEW.md)\n- [Firmware Arduino cải tiến](firmware/videoPlayer/videoPlayer.ino)\n- [Cấu hình TFT_eSPI](firmware/videoPlayer/User_Setup_Xingzhi.h)\n- [Nhiệm vụ Codex: kiểm tra COM9 và nạp thử](CODEX_DEVICE_TEST_TASK.md)
 
 ## Nguồn chính
 
