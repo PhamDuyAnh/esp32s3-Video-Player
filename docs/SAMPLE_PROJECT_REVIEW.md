@@ -26,7 +26,7 @@ Archive chứa sketch `videoPlayer.ino` và output build Arduino ngày 28-05-202
 | LCD | Backlight | 13 | Cấu hình bo chính thức |
 | Nguồn | Power latch | 21 | Cấu hình bo chính thức |
 
-Kết luận mới: biến thể/revision mà dự án mẫu sử dụng có giao tiếp TF/SD độc lập trên GPIO 1/2/3/46. Điều này tốt hơn phương án chia sẻ SPI với LCD và đã loại bỏ điểm chưa chắc chắn trong tài liệu ban đầu. Vẫn cần lưu ý GPIO46 là strapping pin và input-only trên ESP32-S3 theo datasheet; thực tế `SD.begin()` thành công cho thấy phần cứng/thư viện đang dùng nó làm CS theo cách phù hợp với bo mẫu, nhưng phải kiểm tra lại khi thay Arduino core hoặc revision PCB.
+Kết luận mới: biến thể/revision mà dự án mẫu sử dụng có giao tiếp TF/SD độc lập trên GPIO 1/2/3 và sketch khai báo GPIO46 là CS. Điều này tốt hơn phương án chia sẻ SPI với LCD. Tuy nhiên GPIO46 có hạn chế đặc biệt trên ESP32-S3; việc hệ thống thực tế đọc được thẻ chưa chứng minh GPIO46 đang được điều khiển như một CS push-pull thông thường. Cần xác minh schematic hoặc đo logic trước khi diễn giải mạch.
 
 ## 3. Cách vận hành của sketch mẫu
 
