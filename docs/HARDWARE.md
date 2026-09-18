@@ -51,7 +51,7 @@ Các chân dưới đây đã được firmware bo chính thức sử dụng. Ch
 | 21 | Giữ nguồn/power latch | RTC output | Firmware kéo mức 1 để duy trì nguồn, mức 0 để tắt |
 | 38 | Trạng thái sạc | Input | Mức 1 được firmware hiểu là đang sạc |
 | 39 | Volume− | Input, pull-up | Có thể dùng Previous khi phát media |
-| 40 | Volume+ | Input, pull-up | Có thể dùng Next khi phát media |
+| 40 | Volume+ | Input, pull-up | Có thể dùng Next khi phát media |\n| 46 | TF/SD CS theo sketch mẫu | Cần xác minh điện | GPIO đặc biệt; không xem như output thông thường nếu chưa đo/schematic |
 
 ### Cấu hình LCD
 
