@@ -162,6 +162,7 @@ void playReferenceTone() {
   const esp_err_t init = i2s_driver_install(I2S_NUM_1, &cfg, 0, nullptr);
   if (init != ESP_OK) { Serial.printf("[AUDIO] tone init error=%d\n", init); return; }
   i2s_pin_config_t pins = {};
+  pins.mck_io_num = I2S_PIN_NO_CHANGE;
   pins.bck_io_num = board::speaker_bclk;
   pins.ws_io_num = board::speaker_lrck;
   pins.data_out_num = board::speaker_dout;
@@ -241,6 +242,7 @@ void testMic() {
   const esp_err_t init = i2s_driver_install(I2S_NUM_1, &cfg, 0, nullptr);
   if (init != ESP_OK) { Serial.printf("[MIC] init error=%d\n", init); return; }
   i2s_pin_config_t pins = {};
+  pins.mck_io_num = I2S_PIN_NO_CHANGE;
   pins.bck_io_num = board::mic_sck;
   pins.ws_io_num = board::mic_ws;
   pins.data_out_num = I2S_PIN_NO_CHANGE;

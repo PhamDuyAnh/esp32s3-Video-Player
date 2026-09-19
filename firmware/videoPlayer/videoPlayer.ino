@@ -98,7 +98,12 @@ uint32_t menuGuardUntilMs = 0;
 
 bool serialStopRequested() {
   while (Serial.available()) {
-    if (Serial.read() == 'x') return true;
+    const char command = static_cast<char>(Serial.read());
+    if (command == 'x' || command == 's') return true;
+    if (command == '?') {
+      Serial.printf("[BUTTON] SELECT raw=%d playing=%d\n",
+                    digitalRead(PIN_BTN_SEL), isPlaying);
+    }
   }
   return false;
 }
@@ -145,14 +150,20 @@ SelectEvent pollSelect() {
   if (!wasPressed && isPressed) {
     buttonSelect.pressedAtMs = now;
     buttonSelect.longReported = false;
+    Serial.println("[BUTTON] SELECT pressed");
   }
   if (isPressed && !buttonSelect.longReported &&
       uint32_t(now - buttonSelect.pressedAtMs) >= SELECT_HOLD_MS) {
     buttonSelect.longReported = true;
+    Serial.println("[BUTTON] SELECT long");
     return SelectEvent::Long;
   }
   if (wasPressed && !isPressed) {
-    if (!buttonSelect.longReported) return SelectEvent::Short;
+    if (!buttonSelect.longReported) {
+      Serial.println("[BUTTON] SELECT short");
+      return SelectEvent::Short;
+    }
+    Serial.println("[BUTTON] SELECT released after stop/long");
   }
   return SelectEvent::None;
 }
@@ -288,6 +299,7 @@ bool startAudio(const String &path) {
 
 bool playbackStopRequested() {
   if (buttonPressed(buttonSelect)) {
+    Serial.println("[BUTTON] SELECT stop playback");
     playbackStopReason = "select";
     buttonSelect.longReported = true; // Ignore this release in the video menu.
     playbackInterrupted = true;
@@ -895,6 +907,7 @@ void setup() {
   audioConfig.dma_buf_len = 240;
   audioConfig.tx_desc_auto_clear = true;
   i2s_pin_config_t audioPins = {};
+  audioPins.mck_io_num = I2S_PIN_NO_CHANGE; // GPIO0 is the SELECT button.
   audioPins.bck_io_num = I2S_BCLK;
   audioPins.ws_io_num = I2S_LRC;
   audioPins.data_out_num = I2S_DOUT;
@@ -923,7 +936,7 @@ void setup() {
   Serial.printf("[SETTINGS] volume=%u auto=%d repeat=%d multi=%d random=%d\n",
                 settings.volume, settings.autoStart, settings.repeat,
                 settings.multi, settings.randomOrder);
-  Serial.println("[TEST] Select file with digit 0-9; run A/B/C/D/E/F; x stops playback; p plays selected file");
+  Serial.println("[TEST] 0-9 select file; A-F profiles; p play; s SELECT; u UP; d DOWN; m long SELECT; x stop; ? button state");
 }
 
 void loop() {
@@ -940,10 +953,18 @@ void loop() {
     return;
   }
 
-  const SelectEvent select = pollSelect();
+  const char command = Serial.available() ? static_cast<char>(Serial.read()) : 0;
+  if (command == '?') {
+    Serial.printf("[BUTTON] SELECT raw=%d stable=%d long=%d screen=%d\n",
+                  digitalRead(PIN_BTN_SEL), buttonSelect.stableLevel,
+                  buttonSelect.longReported, static_cast<int>(screen));
+  }
+  SelectEvent select = pollSelect();
+  if (command == 's') select = SelectEvent::Short;
+  if (command == 'm') select = SelectEvent::Long;
   if (screen == Screen::Settings) {
-    if (buttonPressed(buttonDown)) changeSetting(1);
-    if (buttonPressed(buttonUp)) changeSetting(-1);
+    if (buttonPressed(buttonDown) || command == 'd') changeSetting(1);
+    if (buttonPressed(buttonUp) || command == 'u') changeSetting(-1);
     if (select == SelectEvent::Short) selectSetting();
     if (select == SelectEvent::Long) leaveSettings();
     delay(1);
@@ -960,13 +981,13 @@ void loop() {
     return;
   }
 
-  if (buttonPressed(buttonDown) && fileCount > 0) {
+  if ((buttonPressed(buttonDown) || command == 'd') && fileCount > 0) {
     selectedIndex = (selectedIndex + 1) % static_cast<int>(fileCount);
     saveSelectedVideo();
     drawMenu();
   }
 
-  if (buttonPressed(buttonUp) && fileCount > 0) {
+  if ((buttonPressed(buttonUp) || command == 'u') && fileCount > 0) {
     selectedIndex =
         (selectedIndex - 1 + static_cast<int>(fileCount)) % static_cast<int>(fileCount);
     saveSelectedVideo();
@@ -979,8 +1000,7 @@ void loop() {
     playPlaylist();
   }
 
-  if (Serial.available()) {
-    const char command = static_cast<char>(Serial.read());
+  if (command) {
     if (command >= '0' && command <= '9') {
       const int index = command - '0';
       if (index < static_cast<int>(fileCount)) {

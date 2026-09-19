@@ -6,7 +6,7 @@ Trình phát video từ thẻ microSD cho bo **xingzhi-cube-1.54tft-wifi** (ESP3
 
 - Bo COM9 đã được nhận dạng, sao lưu flash, thử LCD, nút, thẻ, loa và microphone. Firmware trình phát đã được build và nạp lên bo; xem [báo cáo thử nghiệm](docs/DEVICE_TEST_REPORT.md).
 - Menu chọn video và menu cài đặt đã được xác nhận hiển thị và thao tác được. Tác dụng của từng chế độ phát và âm lượng mới chưa được kiểm tra đầy đủ.
-- Lỗi tự thoát ở video 4, 7, 8 đã được tái hiện qua Serial: khi hai task cùng đọc SD, một khối MJPEG nhận nhầm dữ liệu WAV. Firmware hiện đọc cả hai tệp trên cùng task, đệm PCM cho task I2S và dừng an toàn nếu JPEG hỏng. Các lượt chuyển 4/7/8 qua Serial đạt khoảng 15 fps, audio vẫn chạy; cần thêm phản hồi nghe loa và thao tác nút thực tế.
+- Lỗi tự thoát ở video 4, 7, 8 đã được tái hiện qua Serial: khi hai task cùng đọc SD, một khối MJPEG nhận nhầm dữ liệu WAV. Firmware hiện đọc cả hai tệp trên cùng task, đệm PCM cho task I2S và dừng an toàn nếu JPEG hỏng. Video 4 chạy trọn 2.151 khung ở 15 fps, không rơi khung và không thiếu dữ liệu audio. Lỗi SELECT sau đó do I2S chiếm nhầm GPIO0; đã sửa và xác nhận nút dừng/chọn video trên bo.
 
 ## Chuẩn bị video và thẻ
 
@@ -28,6 +28,7 @@ Chép **cả hai tệp** của mỗi cặp vào thư mục gốc thẻ microSD. 
 - UP/DOWN: chọn video; nhấn ngắn SELECT rồi thả: phát.
 - Giữ SELECT ít nhất 1 giây ở danh mục: mở cài đặt. Trong lúc phát, nhấn SELECT để dừng.
 - Menu cài đặt cho phép chỉnh âm lượng, tự phát sau khởi động, phát một lượt hoặc lặp, phát một video hoặc cả danh mục, và thứ tự tuần tự hoặc ngẫu nhiên. Cài đặt và tên video được chọn được lưu trong bộ nhớ bo. Xem [hướng dẫn cài đặt](docs/PLAYBACK_SETTINGS.md).
+- UART 115200 baud: `u`/`d` tương đương UP/DOWN, `s` tương đương SELECT ngắn (hoặc dừng video đang phát), `m` tương đương giữ SELECT để vào/thoát cài đặt. `0`–`9` chọn video theo chỉ số danh sách, `p` phát, `x` dừng, `?` in trạng thái nút SELECT. Các lệnh `A`–`F` dùng để đo profile kỹ thuật.
 
 ## Build và tài liệu
 
