@@ -22,12 +22,12 @@ Date: 2026-09-18. Target: `xingzhi-cube-1.54tft-wifi`.
 | Test | Status | Evidence |
 |---|---|---|
 | Boot diagnostics | Passed | Serial: ESP32-S3, CPU 240 MHz, flash 16,777,216 bytes, PSRAM detected with 8,386,247 bytes, internal free heap 315,140 bytes, reset reason 4 |
-| LCD colors/orientation | Pending | Visual confirmation required |
-| GPIO0/39/40 buttons | Partial | Serial recorded press/release on GPIO39 and GPIO40; SELECT was seen pressed in an earlier run. One deliberate SELECT press/release still needs confirmation |
+| LCD colors/orientation | Passed for colors | User confirmed the five colors changed correctly. Orientation/artefact details were not separately described |
+| GPIO0/39/40 buttons | Passed with caveat | Serial recorded press/release on all three GPIOs across runs; user reported pressing SELECT. The deliberate SELECT press did not produce a new captured edge in the latest monitor window |
 | TF/SD 20 MHz | Passed | Card type 3, capacity 32,220,643,328 bytes; file listing succeeded; 4 MiB sequential read in 2,591 ms = 1,580 KB/s, zero read errors |
 | TF/SD 40 MHz | Passed, no useful speed gain | 4 MiB sequential read in 2,595 ms = 1,578 KB/s, zero read errors; returned to 20 MHz, 1,579 KB/s |
-| Audio only | Partial | Reference 1 kHz/24 kHz tone completed for 8 seconds at peak 6,000/32,767; listening confirmation required. Existing card WAV is 22,050 Hz and was rejected for the target profile |
-| Microphone | Partial | 16 kHz I²S capture produced RMS/peak logs; peak varied from about 500 to 9,501 after startup. Correlation with deliberate speech/clap still needs confirmation |
+| Audio only | Passed for speaker path | Reference 1 kHz/24 kHz tone completed for 8 seconds at peak 6,000/32,767; user reported sound OK. Existing card WAV is 22,050 Hz, so playback of a compliant 24 kHz WAV remains untested |
+| Microphone | Passed | User reported making noise during capture; 16 kHz I²S peak rose from roughly 700 to 8,343 in the same run |
 
 The test firmware does not write to SD and passes `format_if_empty=false` to the Arduino SD API. This API does not expose a read-only mount option; all application file opens use `FILE_READ`.
 
@@ -37,7 +37,17 @@ The first reference-tone attempt could not install I²S0 because the Audio libra
 
 ## Player and media matrix
 
-Player build/upload and tests A–F are pending successful self-test. No FPS, dropped-frame, audio quality, or SD throughput figures are claimed yet. The untracked WAV files found in `videoConverter/output_sd/` are 16-bit mono at 22050 Hz, so they do not meet the target 24000 Hz audio profile. They were not modified or copied to SD.
+Player build/upload and tests A–F are pending. The player now builds, but no FPS or dropped-frame figures are claimed yet. The media on SD was generated at 25 fps with 16-bit mono 22050 Hz WAV, so it does not meet the target 15 fps/24000 Hz profile. These media files were not modified or copied to SD.
+
+### Player observations
+
+- Test A, `7.mjpeg`, 10 fps, SD 20 MHz, audio off: 1937 decoded, 0 dropped over about 194 seconds. User reported correct display.
+- Test B, `7.mjpeg`, 15 fps, SD 20 MHz, audio off: 2894 decoded, 8 dropped (0.28%) over about 193 seconds. User reported smoother motion and compression grain in some scenes.
+- Existing `7.mjpeg` and `8.mjpeg` contain a custom leading byte `25`, then valid JPEG streams. They are 25 fps. Their WAV files are PCM mono 16-bit/22050 Hz. The player tolerates the leading byte but this is not the target format.
+- Offline scan of `8.mjpeg`: 5049 complete JPEG frames, no truncated frame, maximum frame 12936 bytes, no frame above the 96 KiB buffer limit. A bad/oversized JPEG is therefore not the likely cause of its intermittent freeze.
+- The observed failure signature (image stops, audio continues, SELECT cannot exit) points to concurrent FAT/SD access from video and audio tasks. The player now serializes all Audio and video file reads with one mutex, limits each video read to 16 KiB, and polls SELECT/serial stop while scanning frame markers.
+- Retest of existing video 8 with the fix and volume 6/21 reached 926 decoded frames; SELECT produced a final metric, closed audio and returned from playback. No unresponsive SELECT was observed in that run.
+- Starting more files immediately after that test produced JPEG open failures. The final build adds a 50 ms teardown delay and a 300 ms button guard before another file may start. This transition fix is built and uploaded but still needs a repeated-file hardware test.
 
 ## Rollback
 
@@ -45,4 +55,4 @@ Once the backup has a verified 16 MB length and SHA-256, it can be restored with
 
 ## Current recommendation
 
-Self-test firmware is currently installed. Keep LCD at 40 MHz and SD at 20 MHz: the 40 MHz SD trial showed no throughput gain. Wait for LCD and audio listening confirmation before building/uploading the player.
+The updated player is installed on COM9. Keep LCD at 40 MHz and SD at 20 MHz: the 40 MHz SD trial showed no throughput gain. Default volume is 6/21. Convert new media with `videoConverter/videoConvert.py` to MJPEG 240×240/15 fps plus PCM mono 16-bit/24 kHz WAV.
