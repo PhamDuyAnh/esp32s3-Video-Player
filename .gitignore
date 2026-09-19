@@ -3,3 +3,4 @@
 .pio/
 videoConverter/input_videos/
 videoConverter/output_sd/
+videoConverter/__pycache__/
