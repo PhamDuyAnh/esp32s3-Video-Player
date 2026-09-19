@@ -56,3 +56,11 @@ Once the backup has a verified 16 MB length and SHA-256, it can be restored with
 ## Current recommendation
 
 The updated player is installed on COM9. Keep LCD at 40 MHz and SD at 20 MHz: the 40 MHz SD trial showed no throughput gain. Default volume is 6/21. Convert new media with `videoConverter/videoConvert.py` to MJPEG 240×240/15 fps plus PCM mono 16-bit/24 kHz WAV.
+
+### 2026-09-19: 24 fps feasibility and media preparation
+
+- At LCD SPI 40 MHz, 24 fps video-only on the older `7.mjpeg` reached roughly 20.5–22.3 effective fps in early windows and dropped 165 frames by the stop point. LCD push took about 26.8 ms/frame.
+- Changing only LCD SPI to 80 MHz reduced LCD push to about 15.25 ms/frame. Light scenes initially achieved 24 fps with no drops, but heavy scenes fell to 15–22 fps and cumulative drops reached 158 by the later log. Video/audio together at 24–25 fps was not attempted because video-only did not pass.
+- The 80 MHz display trial did not complete a 30-minute visual stability test. Firmware was rebuilt and reuploaded with the proven LCD 40 MHz, SD 20 MHz, 15 fps configuration; the final upload hash verified on COM9.
+- `python videoConverter/videoConvert.py` regenerated all six source videos present in `input_videos`: 1, 2, 3, 4, 7, 8. Output `.mjpeg` starts at JPEG SOI without a custom header; WAV is PCM mono 16-bit/24 kHz. The new `8.mjpeg` has 3028 frames, maximum JPEG 4669 bytes, and A/V duration difference about 0.05 s. Media remained on the PC; no write to the device SD card occurred.
+- For card transfer, see `docs/MEDIA_TRANSFER.md` and `scripts/sync-media.ps1`. It requires a removable card reader drive and verifies SHA-256 after copying; it has not been run against a card.
