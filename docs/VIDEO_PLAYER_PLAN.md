@@ -1,5 +1,7 @@
 # Kế hoạch phát triển trình phát video
 
+> **Tài liệu đề xuất ban đầu.** Các phần dưới đây mô tả hướng AVI/ESP-IDF từng được cân nhắc, chưa phải cách vận hành của firmware hiện tại. Bản đang chạy dùng Arduino-ESP32, cặp `.mjpeg` + `.wav` ở thư mục gốc thẻ, 15 fps. Xem [README](../README.md), [MEDIA_FORMAT.md](MEDIA_FORMAT.md) và [PLAYBACK_SETTINGS.md](PLAYBACK_SETTINGS.md). Giữ phần kế hoạch này để tham khảo khi phát triển phiên bản sau.
+
 ## 1. Mục tiêu và giới hạn
 
 Thiết bị đọc media từ thẻ TF/microSD, tạo danh sách tệp hợp lệ, sắp xếp xác định, phát tuần tự trên LCD 240×240 và loa tích hợp.

@@ -6,7 +6,7 @@
  *   001_demo.mjpeg  (raw baseline JPEG stream, 240x240, TARGET_FPS)
  *   001_demo.wav    (PCM s16le, mono, 24000 Hz)
  *
- * Status: code-review prototype; hardware build/test is still required.
+ * Tested on COM9: 15 fps, LCD SPI 40 MHz, SD SPI 20 MHz.
  */
 
 #include <Arduino.h>
@@ -14,6 +14,7 @@
 #include <SPI.h>
 #include <TFT_eSPI.h>
 #include <JPEGDEC.h>
+#include <Preferences.h>
 #include "Audio.h"
 #include <esp_heap_caps.h>
 #include <freertos/semphr.h>
@@ -46,11 +47,29 @@ static constexpr size_t MJPEG_BUFFER_SIZE = 96U * 1024U;
 static constexpr size_t MAX_FILES = 50;
 static constexpr uint32_t SD_FREQUENCY = 20000000UL;
 static constexpr uint32_t AUDIO_PREROLL_MS = 120;
+static constexpr uint32_t SELECT_HOLD_MS = 1000;
 
 TFT_eSPI tft;
 JPEGDEC jpeg;
 Audio audio;
 SPIClass sdSPI(HSPI);
+Preferences preferences;
+
+struct PlaybackSettings {
+  uint8_t volume = DEFAULT_VOLUME;
+  bool autoStart = false;
+  bool repeat = false;
+  bool multi = false;
+  bool randomOrder = false;
+} settings;
+
+enum class Screen { Videos, Settings };
+Screen screen = Screen::Videos;
+uint8_t settingRow = 0;
+bool editingVolume = false;
+uint32_t autoStartAtMs = 0;
+bool playbackInterrupted = false;
+const char *playbackStopReason = "end-of-file";
 
 void audio_info(const char *message) {
   Serial.printf("[AUDIO-LIB] %s\n", message);
@@ -89,13 +108,15 @@ struct ButtonState {
   bool stableLevel;
   bool lastRawLevel;
   uint32_t changedAtMs;
+  uint32_t pressedAtMs;
+  bool longReported;
 };
 
 bool buttonPressed(ButtonState &button);
 
-ButtonState buttonUp{PIN_BTN_UP, HIGH, HIGH, 0};
-ButtonState buttonDown{PIN_BTN_DOWN, HIGH, HIGH, 0};
-ButtonState buttonSelect{PIN_BTN_SEL, HIGH, HIGH, 0};
+ButtonState buttonUp{PIN_BTN_UP, HIGH, HIGH, 0, 0, false};
+ButtonState buttonDown{PIN_BTN_DOWN, HIGH, HIGH, 0, 0, false};
+ButtonState buttonSelect{PIN_BTN_SEL, HIGH, HIGH, 0, 0, false};
 
 bool buttonPressed(ButtonState &button) {
   const bool raw = digitalRead(button.pin);
@@ -111,6 +132,52 @@ bool buttonPressed(ButtonState &button) {
     return button.stableLevel == LOW;
   }
   return false;
+}
+
+enum class SelectEvent { None, Short, Long };
+SelectEvent pollSelect();
+
+SelectEvent pollSelect() {
+  const uint32_t now = millis();
+  const bool wasPressed = buttonSelect.stableLevel == LOW;
+  buttonPressed(buttonSelect);
+  const bool isPressed = buttonSelect.stableLevel == LOW;
+  if (!wasPressed && isPressed) {
+    buttonSelect.pressedAtMs = now;
+    buttonSelect.longReported = false;
+  }
+  if (isPressed && !buttonSelect.longReported &&
+      uint32_t(now - buttonSelect.pressedAtMs) >= SELECT_HOLD_MS) {
+    buttonSelect.longReported = true;
+    return SelectEvent::Long;
+  }
+  if (wasPressed && !isPressed && !buttonSelect.longReported) return SelectEvent::Short;
+  return SelectEvent::None;
+}
+
+void saveSelectedVideo() {
+  if (fileCount > 0) preferences.putString("selected", fileList[selectedIndex]);
+}
+
+void saveSettings() {
+  preferences.putUChar("volume", settings.volume);
+  preferences.putBool("autostart", settings.autoStart);
+  preferences.putBool("repeat", settings.repeat);
+  preferences.putBool("multi", settings.multi);
+  preferences.putBool("random", settings.randomOrder);
+  Serial.printf("[SETTINGS] volume=%u auto=%d repeat=%d multi=%d random=%d\n",
+                settings.volume, settings.autoStart, settings.repeat,
+                settings.multi, settings.randomOrder);
+}
+
+void loadSettings() {
+  preferences.begin("video-player", false);
+  settings.volume = preferences.getUChar("volume", DEFAULT_VOLUME);
+  if (settings.volume > 21) settings.volume = DEFAULT_VOLUME;
+  settings.autoStart = preferences.getBool("autostart", false);
+  settings.repeat = preferences.getBool("repeat", false);
+  settings.multi = preferences.getBool("multi", false);
+  settings.randomOrder = preferences.getBool("random", false);
 }
 
 void audioServiceTask(void *) {
@@ -154,7 +221,19 @@ bool startAudio(const String &path) {
 }
 
 bool playbackStopRequested() {
-  return buttonPressed(buttonSelect) || serialStopRequested();
+  if (buttonPressed(buttonSelect)) {
+    playbackStopReason = "select";
+    buttonSelect.longReported = true; // Ignore this release in the video menu.
+    playbackInterrupted = true;
+    return true;
+  }
+  if (serialStopRequested()) {
+    playbackStopReason = "serial-x";
+    buttonSelect.longReported = true; // Ignore this release in the video menu.
+    playbackInterrupted = true;
+    return true;
+  }
+  return false;
 }
 
 void stopAudio() {
@@ -185,6 +264,8 @@ bool refillVideoBuffer(File &file) {
     return false;
   }
   const size_t bytesRead = file.read(mjpegBuffer + bufferEnd, freeBytes);
+  const size_t filePosition = file.position();
+  const size_t fileSize = file.size();
   xSemaphoreGive(mediaMutex);
   videoSdReadUs += micros() - started;
   videoSdBytes += bytesRead;
@@ -193,6 +274,11 @@ bool refillVideoBuffer(File &file) {
 
   if (bytesRead == 0) {
     videoEof = true;
+    if (filePosition < fileSize) {
+      playbackStopReason = "sd-read-failed";
+      Serial.printf("[SD] Unexpected zero read at %u/%u\n",
+                    static_cast<unsigned>(filePosition), static_cast<unsigned>(fileSize));
+    }
   }
   return bytesRead > 0;
 }
@@ -253,6 +339,7 @@ bool nextJpegFrame(File &file, uint8_t *&frameData, size_t &frameSize) {
     }
 
     if (videoEof) {
+      if (strcmp(playbackStopReason, "end-of-file") == 0) playbackStopReason = "truncated-jpeg";
       Serial.println("[VIDEO] Truncated JPEG at end of file");
       return false;
     }
@@ -262,6 +349,7 @@ bool nextJpegFrame(File &file, uint8_t *&frameData, size_t &frameSize) {
     compactVideoBuffer();
 
     if (bufferEnd == MJPEG_BUFFER_SIZE) {
+      playbackStopReason = "oversized-jpeg";
       Serial.printf("[VIDEO] JPEG frame exceeds %u bytes\n",
                     static_cast<unsigned>(MJPEG_BUFFER_SIZE));
       return false;
@@ -336,7 +424,7 @@ void drawMenu() {
   tft.println("SELECT VIDEO");
   tft.drawFastHLine(0, 32, tft.width(), TFT_BLUE);
 
-  const int maxVisible = (tft.height() - 42) / 22;
+  const int maxVisible = (tft.height() - 60) / 22;
   int first = 0;
   if (selectedIndex >= maxVisible) {
     first = selectedIndex - maxVisible + 1;
@@ -353,9 +441,76 @@ void drawMenu() {
     tft.print(index == selectedIndex ? "> " : "  ");
     tft.println(fileList[index]);
   }
+  tft.setTextSize(1);
+  tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+  tft.setCursor(2, tft.height() - 9);
+  tft.print("Hold SELECT 1s: settings");
 }
 
-void playVideo(const String &videoName) {
+void drawSettings() {
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextSize(2);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setCursor(8, 8);
+  tft.println("SETTINGS");
+  tft.drawFastHLine(0, 32, tft.width(), TFT_BLUE);
+  const String rows[] = {
+      "VOLUME " + String(settings.volume),
+      String("AUTO ") + (settings.autoStart ? "ON" : "OFF"),
+      String("PLAY ") + (settings.repeat ? "REPEAT" : "ONE"),
+      String("FILES ") + (settings.multi ? "MULTI" : "ONE"),
+      String("ORDER ") + (settings.randomOrder ? "RANDOM" : "SEQ"),
+      "BACK"};
+  for (uint8_t row = 0; row < 6; ++row) {
+    tft.setCursor(4, 40 + row * 29);
+    tft.setTextColor(row == settingRow ? TFT_GREEN : TFT_LIGHTGREY, TFT_BLACK);
+    tft.print(row == settingRow ? ">" : " ");
+    tft.print(rows[row]);
+    if (row == 0 && editingVolume) tft.print(" *");
+  }
+  tft.setTextSize(1);
+  tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+  tft.setCursor(4, 220);
+  tft.print(editingVolume ? "UP/DOWN: volume  SEL: done" : "UP/DOWN: item  SEL: change");
+}
+
+void leaveSettings() {
+  editingVolume = false;
+  screen = Screen::Videos;
+  drawMenu();
+  menuGuardUntilMs = millis() + 250;
+}
+
+void changeSetting(int direction) {
+  if (settingRow == 0 && editingVolume) {
+    const int next = constrain(static_cast<int>(settings.volume) + direction, 0, 21);
+    settings.volume = static_cast<uint8_t>(next);
+    if (xSemaphoreTake(mediaMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+      audio.setVolume(settings.volume);
+      xSemaphoreGive(mediaMutex);
+    }
+    saveSettings();
+    drawSettings();
+  } else {
+    settingRow = (settingRow + 6 + direction) % 6;
+    drawSettings();
+  }
+}
+
+void selectSetting() {
+  switch (settingRow) {
+    case 0: editingVolume = !editingVolume; break;
+    case 1: settings.autoStart = !settings.autoStart; break;
+    case 2: settings.repeat = !settings.repeat; break;
+    case 3: settings.multi = !settings.multi; break;
+    case 4: settings.randomOrder = !settings.randomOrder; break;
+    default: leaveSettings(); return;
+  }
+  saveSettings();
+  drawSettings();
+}
+
+bool playVideo(const String &videoName) {
   String videoPath = "/" + videoName;
   String audioPath = videoPath;
   const int extensionAt = audioPath.lastIndexOf('.');
@@ -366,8 +521,11 @@ void playVideo(const String &videoName) {
   File videoFile = SD.open(videoPath.c_str(), FILE_READ);
   if (!videoFile) {
     Serial.printf("[VIDEO] Open failed: %s\n", videoPath.c_str());
-    return;
+    return true; // Stop the playlist instead of retrying this file forever.
   }
+
+  playbackInterrupted = false;
+  playbackStopReason = "end-of-file";
 
   videoSdBytes = 0;
   videoSdReadUs = 0;
@@ -383,7 +541,7 @@ void playVideo(const String &videoName) {
   if (hasAudio) {
     const uint32_t prerollUntil = millis() + AUDIO_PREROLL_MS;
     while ((int32_t)(millis() - prerollUntil) < 0) {
-      if (buttonPressed(buttonSelect) || serialStopRequested()) {
+      if (playbackStopRequested()) {
         isPlaying = false;
         break;
       }
@@ -461,7 +619,7 @@ void playVideo(const String &videoName) {
       nextFrameAt += framePeriodUs;
     } else {
       while ((int32_t)(micros() - nextFrameAt) < 0) {
-        if (buttonPressed(buttonSelect) || serialStopRequested()) {
+        if (playbackStopRequested()) {
           isPlaying = false;
           break;
         }
@@ -486,10 +644,7 @@ void playVideo(const String &videoName) {
       nextFrameAt += framePeriodUs;
     }
 
-    if (buttonPressed(buttonSelect)) {
-      isPlaying = false;
-    }
-    if (serialStopRequested()) isPlaying = false;
+    if (playbackStopRequested()) isPlaying = false;
     logMetrics(false);
     delay(1);
   }
@@ -498,11 +653,56 @@ void playVideo(const String &videoName) {
   logMetrics(true);
   stopAudio();
   delay(50);  // Let I2S/FAT teardown settle before another file can start.
+  const size_t stoppedAt = videoFile.position();
+  const size_t fileSize = videoFile.size();
   videoFile.close();
 
-  Serial.printf("[VIDEO] done, decoded=%lu dropped=%lu\n",
+  Serial.printf("[VIDEO] done, reason=%s pos=%u/%u decoded=%lu dropped=%lu\n",
+                playbackStopReason, static_cast<unsigned>(stoppedAt),
+                static_cast<unsigned>(fileSize),
                 static_cast<unsigned long>(decodedFrames),
                 static_cast<unsigned long>(droppedFrames));
+  return playbackInterrupted;
+}
+
+void playPlaylist() {
+  if (fileCount == 0) return;
+  autoStartAtMs = 0;
+  saveSelectedVideo();
+  const int first = selectedIndex;
+  const size_t count = settings.multi ? fileCount : 1;
+  int order[MAX_FILES];
+  for (size_t i = 0; i < count; ++i) {
+    order[i] = (first + static_cast<int>(i)) % static_cast<int>(fileCount);
+  }
+  bool firstPass = true;
+  do {
+    if (settings.multi && settings.randomOrder) {
+      // The selected video leads the first cycle; later cycles shuffle all files.
+      const size_t start = firstPass ? 1 : 0;
+      for (size_t i = count; i > start + 1; --i) {
+        const size_t j = start + (esp_random() % (i - start));
+        const int temp = order[i - 1];
+        order[i - 1] = order[j];
+        order[j] = temp;
+      }
+    }
+    for (size_t i = 0; i < count; ++i) {
+      if (!SD.exists(("/" + fileList[order[i]]).c_str())) {
+        Serial.println("[PLAYLIST] Video missing; stopping playlist");
+        drawMenu();
+        return;
+      }
+      Serial.printf("[PLAYLIST] %u/%u %s\n", static_cast<unsigned>(i + 1),
+                    static_cast<unsigned>(count), fileList[order[i]].c_str());
+      if (playVideo(fileList[order[i]])) {
+        drawMenu();
+        menuGuardUntilMs = millis() + 300;
+        return;
+      }
+    }
+    firstPass = false;
+  } while (settings.repeat);
   drawMenu();
   menuGuardUntilMs = millis() + 300;
 }
@@ -571,7 +771,7 @@ void runProfile(char profile) {
                 profile, fileList[selectedIndex].c_str(), playbackFps,
                 static_cast<unsigned long>(sdFrequency / 1000000), playbackAudio);
   if (profile == 'C') playAudioOnly(fileList[selectedIndex]);
-  else playVideo(fileList[selectedIndex]);
+  else { playVideo(fileList[selectedIndex]); drawMenu(); }
   if (profile == 'F') setSdClock(20000000UL);
 }
 
@@ -586,6 +786,7 @@ void setup() {
   pinMode(PIN_BTN_UP, INPUT_PULLUP);
   pinMode(PIN_BTN_DOWN, INPUT_PULLUP);
   pinMode(PIN_BTN_SEL, INPUT_PULLUP);
+  loadSettings();
 
   tft.init();
   tft.setRotation(TFT_ROTATION);
@@ -622,8 +823,8 @@ void setup() {
     while (true) delay(1000);
   }
   Serial.printf("[AUDIO] pinout=%d volume=%u\n",
-                audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT), DEFAULT_VOLUME);
-  audio.setVolume(DEFAULT_VOLUME);
+                audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT), settings.volume);
+  audio.setVolume(settings.volume);
 
   BaseType_t taskResult = xTaskCreatePinnedToCore(
       audioServiceTask,
@@ -642,7 +843,15 @@ void setup() {
   }
 
   scanFiles();
+  const String savedVideo = preferences.getString("selected", "");
+  for (size_t i = 0; i < fileCount; ++i) {
+    if (fileList[i] == savedVideo) { selectedIndex = static_cast<int>(i); break; }
+  }
   drawMenu();
+  if (settings.autoStart && fileCount > 0) autoStartAtMs = millis() + 1000;
+  Serial.printf("[SETTINGS] volume=%u auto=%d repeat=%d multi=%d random=%d\n",
+                settings.volume, settings.autoStart, settings.repeat,
+                settings.multi, settings.randomOrder);
   Serial.println("[TEST] Select file with digit 0-9; run A/B/C/D/E/F; x stops playback; p plays selected file");
 }
 
@@ -655,24 +864,48 @@ void loop() {
   if (static_cast<int32_t>(millis() - menuGuardUntilMs) < 0) {
     buttonPressed(buttonDown);
     buttonPressed(buttonUp);
-    buttonPressed(buttonSelect);
+    pollSelect();
+    delay(1);
+    return;
+  }
+
+  const SelectEvent select = pollSelect();
+  if (screen == Screen::Settings) {
+    if (buttonPressed(buttonDown)) changeSetting(1);
+    if (buttonPressed(buttonUp)) changeSetting(-1);
+    if (select == SelectEvent::Short) selectSetting();
+    if (select == SelectEvent::Long) leaveSettings();
+    delay(1);
+    return;
+  }
+
+  if (select == SelectEvent::Long) {
+    autoStartAtMs = 0;
+    screen = Screen::Settings;
+    settingRow = 0;
+    editingVolume = false;
+    drawSettings();
     delay(1);
     return;
   }
 
   if (buttonPressed(buttonDown) && fileCount > 0) {
     selectedIndex = (selectedIndex + 1) % static_cast<int>(fileCount);
+    saveSelectedVideo();
     drawMenu();
   }
 
   if (buttonPressed(buttonUp) && fileCount > 0) {
     selectedIndex =
         (selectedIndex - 1 + static_cast<int>(fileCount)) % static_cast<int>(fileCount);
+    saveSelectedVideo();
     drawMenu();
   }
 
-  if (buttonPressed(buttonSelect) && fileCount > 0) {
-    playVideo(fileList[selectedIndex]);
+  if (select == SelectEvent::Short && fileCount > 0) {
+    playbackFps = TARGET_FPS;
+    playbackAudio = true;
+    playPlaylist();
   }
 
   if (Serial.available()) {
@@ -681,6 +914,7 @@ void loop() {
       const int index = command - '0';
       if (index < static_cast<int>(fileCount)) {
         selectedIndex = index;
+        saveSelectedVideo();
         Serial.printf("[TEST] selected index=%d file=%s\n", index, fileList[index].c_str());
         drawMenu();
       }
@@ -689,8 +923,14 @@ void loop() {
     } else if (command == 'p' && fileCount > 0) {
       playbackFps = TARGET_FPS;
       playbackAudio = true;
-      playVideo(fileList[selectedIndex]);
+      playPlaylist();
     }
+  }
+
+  if (autoStartAtMs && static_cast<int32_t>(millis() - autoStartAtMs) >= 0) {
+    playbackFps = TARGET_FPS;
+    playbackAudio = true;
+    playPlaylist();
   }
 
   delay(1);

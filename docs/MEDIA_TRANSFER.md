@@ -1,25 +1,21 @@
-# Media transfer
+# Chép media lên thẻ microSD
 
-The current player firmware mounts the SD card for playback and does not expose
-it as USB mass storage or a network share.
+Firmware hiện đọc thẻ để phát video, chưa xuất thẻ thành ổ USB hoặc dịch vụ mạng.
 
-## Recommended workflow
+## Dùng đầu đọc thẻ
 
-1. Insert the SD card in a PC card reader.
-2. Run `scripts/sync-media.ps1 -Destination X:\`, replacing `X:` with the
-   removable SD drive.
-3. The script copies `.mjpeg` and `.wav` files from
-   `videoConverter/output_sd`, then verifies SHA-256 for every destination file.
-   It does not delete unrelated files.
-4. Eject the card safely and return it to the device.
+1. Cắm thẻ vào đầu đọc trên máy tính và xác định ký tự ổ thẻ, ví dụ `X:`.
+2. Từ thư mục gốc dự án, chạy:
 
-## Why upload through the device is not enabled
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\scripts\sync-media.ps1 -Destination X:\
+   ```
 
-Serial upload would require a new binary protocol and exclusive SD ownership
-during transfer. Large video sets would take many minutes at practical serial
-rates. TCP upload can be faster, but requires Wi-Fi provisioning, authentication,
-temporary files, checksums, and recovery from interrupted writes. USB mass
-storage would also require the player to unmount the card while the PC owns it.
+3. Script chép các tệp `.mjpeg` và `.wav` từ `videoConverter/output_sd` vào thư mục gốc thẻ, rồi kiểm tra SHA-256 của từng tệp đích. Script không xóa tệp khác.
+4. Tháo thẻ an toàn và lắp lại vào bo.
 
-These methods are possible future features, but direct card-reader transfer is
-currently faster and has fewer filesystem-corruption risks.
+Có thể chép thủ công nếu muốn; luôn chép đủ cặp video và âm thanh cùng tên. Nếu media mới chưa được chép, firmware vẫn phát các tệp cũ trên thẻ.
+
+## Khả năng chuyển qua thiết bị
+
+Truyền qua Serial cần một giao thức nhị phân riêng và quyền sử dụng thẻ độc quyền trong khi ghi; với bộ video lớn, thời gian truyền có thể dài. Web file manager qua Wi‑Fi là khả thi về kỹ thuật nhưng **chưa được cài đặt**. Khi phát triển, cần tạm dừng phát khi ghi/xóa, ghi vào tệp tạm rồi kiểm tra và đổi tên, xác thực truy cập và xử lý truyền bị ngắt. Đầu đọc thẻ hiện là cách đã có thể sử dụng.

@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 import subprocess
 import wave
+import mmap
 from pathlib import Path
 
 import imageio_ffmpeg
@@ -23,6 +24,7 @@ OUTPUT_DIR = SCRIPT_DIR / "output_sd"
 FFMPEG = Path(imageio_ffmpeg.get_ffmpeg_exe())
 TARGET_WIDTH, TARGET_HEIGHT, TARGET_FPS, TARGET_AUDIO_RATE = 240, 240, 15, 24_000
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".webm"}
+MAX_JPEG_BYTES = 96 * 1024  # Must fit firmware MJPEG_BUFFER_SIZE.
 
 
 def safe_name(stem: str) -> str:
@@ -37,19 +39,24 @@ def run_ffmpeg(command: list[str]) -> None:
 
 
 def inspect_mjpeg(path: Path) -> tuple[int, int]:
-    data, position, frames, largest = path.read_bytes(), 0, 0, 0
-    while position < len(data):
-        start = data.find(b"\xff\xd8", position)
-        if start != position:
-            raise ValueError(f"unexpected MJPEG data at byte {position}")
-        end = data.find(b"\xff\xd9", start + 2)
-        if end < 0:
-            raise ValueError(f"truncated JPEG frame at byte {start}")
-        largest = max(largest, end + 2 - start)
-        frames += 1
-        position = end + 2
-    if not frames:
+    if path.stat().st_size == 0:
         raise ValueError("MJPEG contains no frames")
+    position, frames, largest = 0, 0, 0
+    # mmap searches the output without copying the entire video into Python RAM.
+    with path.open("rb") as source, mmap.mmap(source.fileno(), 0, access=mmap.ACCESS_READ) as data:
+        while position < len(data):
+            start = data.find(b"\xff\xd8", position)
+            if start != position:
+                raise ValueError(f"unexpected MJPEG data at byte {position}")
+            end = data.find(b"\xff\xd9", start + 2)
+            if end < 0:
+                raise ValueError(f"truncated JPEG frame at byte {start}")
+            frame_bytes = end + 2 - start
+            if frame_bytes > MAX_JPEG_BYTES:
+                raise ValueError(f"JPEG frame at byte {start} exceeds {MAX_JPEG_BYTES} bytes")
+            largest = max(largest, frame_bytes)
+            frames += 1
+            position = end + 2
     return frames, largest
 
 
@@ -103,7 +110,15 @@ def main() -> int:
         return 0
     print(f"Converting {len(sources)} file(s) to {OUTPUT_DIR}")
     failures = 0
+    used_names: dict[str, Path] = {}
     for source in sources:
+        output_name = safe_name(source.stem).lower()
+        if output_name in used_names:
+            failures += 1
+            print(f"  ERROR: {source.name} and {used_names[output_name].name} "
+                  f"would overwrite the same output name")
+            continue
+        used_names[output_name] = source
         try:
             convert(source)
         except Exception as error:

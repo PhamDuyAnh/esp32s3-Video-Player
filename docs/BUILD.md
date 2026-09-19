@@ -1,10 +1,15 @@
-# Build for xingzhi-cube-1.54tft-wifi
+# Build và nạp firmware cho xingzhi-cube-1.54tft-wifi
 
-Use `scripts/build.ps1 -Sketch selfTest` or `-Sketch videoPlayer` from PowerShell, or run the matching VSCode build task. The script stores artifacts under `.build/` and uses the repository's `User_Setup_Xingzhi.h` for TFT_eSPI through a compile flag. It does not alter the installed library.
+Trong PowerShell, chạy lệnh tại thư mục gốc dự án:
 
-Verified local toolchain on 2026-09-18:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build.ps1 -Sketch videoPlayer
+powershell -ExecutionPolicy Bypass -File .\scripts\upload.ps1 -Sketch videoPlayer -Port COM9
+```
 
-| Component | Version |
+Có thể thay `videoPlayer` bằng `selfTest` để build/nạp firmware kiểm tra phần cứng. Các tác vụ tương ứng cũng có trong VSCode. Tệp build nằm trong `.build/`; script dùng cấu hình `User_Setup_Xingzhi.h` của dự án qua cờ biên dịch và không sửa thư viện TFT_eSPI đã cài.
+
+| Thành phần | Phiên bản đã thử |
 |---|---|
 | Arduino CLI | nightly-20260916 |
 | Arduino-ESP32 | 2.0.17 |
@@ -12,6 +17,6 @@ Verified local toolchain on 2026-09-18:
 | JPEGDEC | 1.2.8 |
 | ESP32-audioI2S | 2.0.0 |
 
-The FQBN in the script selects ESP32-S3, 16 MB quad flash, OPI PSRAM, USB hardware CDC with CDC on boot, and the 3 MB application partition. `EraseFlash=none` is mandatory. The toolchain and library versions above are the known build set; do not upgrade them as a group without retesting.
+FQBN trong script chọn ESP32-S3, flash quad 16 MB, PSRAM OPI, USB CDC và phân vùng ứng dụng 3 MB. Tùy chọn `EraseFlash=none` giữ nguyên dữ liệu khác trong flash. Không nâng cấp đồng loạt toolchain và thư viện khi chưa thử lại trên bo.
 
-The self-test build succeeds with 768833 bytes of program storage and 35496 bytes of static RAM. Hardware results are recorded separately in `DEVICE_TEST_REPORT.md`.
+Bản `videoPlayer` có menu cài đặt đã build thành công, dùng khoảng 805 KB chương trình và 54 KB RAM tĩnh; đã nạp và xác minh hash trên COM9. Kết quả đo trên thiết bị ở [DEVICE_TEST_REPORT.md](DEVICE_TEST_REPORT.md).

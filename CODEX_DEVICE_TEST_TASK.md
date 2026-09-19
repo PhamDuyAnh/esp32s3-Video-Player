@@ -1,5 +1,7 @@
 # Nhiệm vụ cho Codex: build, kiểm tra COM9 và thử nghiệm firmware
 
+> **Lưu trữ yêu cầu thử nghiệm ban đầu.** Nhiều giai đoạn dưới đây đã hoàn thành; xem [báo cáo thiết bị](docs/DEVICE_TEST_REPORT.md) để biết kết quả hiện tại. Bo của người dùng không có nút RESET riêng. Firmware đang dùng phát cặp `.mjpeg` + `.wav` ở 15 fps và có menu cài đặt.
+
 ## Vai trò
 
 Bạn đang làm việc trực tiếp trong repo `esp32s3-Video-Player` đã mở bằng VSCode trên máy Windows. Hãy chủ động thực hiện công việc trong phạm vi repo và thiết bị ở COM9. Chỉ yêu cầu người dùng phối hợp khi cần quan sát LCD, nghe loa, nhấn nút hoặc xác nhận thao tác phần cứng.

@@ -1,34 +1,45 @@
 # esp32s3-Video-Player
 
-Trình phát video cục bộ cho bo **xingzhi-cube-1.54tft-wifi** (ESP32-S3, LCD ST7789 240×240, âm thanh I²S).
+Trình phát video từ thẻ microSD cho bo **xingzhi-cube-1.54tft-wifi** (ESP32-S3, LCD ST7789 240 × 240, loa I²S). Firmware hiện dùng Arduino-ESP32, phát luồng MJPEG thô ở **15 fps** cùng tệp WAV cùng tên. Cấu hình LCD ổn định ở 40 MHz và SD ở 20 MHz.
 
-> Trạng thái 2026-09-18: đã nhận dạng bo tại COM9 là ESP32-S3 revision 0.2 với flash 16 MB, sao lưu đủ flash và build thành công firmware hardware self-test. Chưa có kết quả kiểm tra LCD, nút, thẻ, audio, microphone hoặc player trên bo; xem [báo cáo thiết bị](docs/DEVICE_TEST_REPORT.md).
+## Trạng thái
 
-## Mục tiêu
+- Bo COM9 đã được nhận dạng, sao lưu flash, thử LCD, nút, thẻ, loa và microphone. Firmware trình phát đã được build và nạp lên bo; xem [báo cáo thử nghiệm](docs/DEVICE_TEST_REPORT.md).
+- Menu chọn video và menu cài đặt đã được xác nhận hiển thị và thao tác được. Tác dụng của từng chế độ phát và âm lượng mới chưa được kiểm tra đầy đủ.
+- Tệp `4.mjpeg` từng được báo tự thoát sau 1–2 giây, nhưng các lần chạy lại qua Serial và nút kéo dài hơn 50 giây. Firmware hiện ghi lý do dừng và vị trí đọc file để chẩn đoán nếu lỗi lặp lại.
+- Các tệp mới tạo bằng converter vẫn nằm trên máy tính; người dùng sẽ chép lên thẻ và thử sau.
 
-- Quét thư mục media trên thẻ TF/microSD.
-- Chỉ nhận các tệp đúng quy ước và định dạng được hỗ trợ.
-- Sắp xếp danh sách phát theo tên tệp, phát tuần tự và lặp lại.
-- Hiển thị video 240×240 trên ST7789, đồng thời phát âm thanh qua loa tích hợp.
-- Hoạt động ổn định khi gặp tệp lỗi, mất thẻ hoặc thiếu dữ liệu.
+## Chuẩn bị video và thẻ
 
-## Kết luận khả thi
+[`videoConverter/videoConvert.py`](videoConverter/videoConvert.py) là công cụ chuyển mã của dự án. Đặt video nguồn vào `videoConverter/input_videos`, rồi chạy:
 
-Bo có thể phát video MJPEG 240×240 kèm WAV. Dự án mẫu đã xác nhận thẻ TF chạy trên SPI riêng: MISO GPIO1, MOSI GPIO2, SCK GPIO3 và CS được sketch khai báo GPIO46. Audio I²S dùng BCLK GPIO15, LRCK GPIO16, DOUT GPIO7.
+```powershell
+python -m pip install imageio-ffmpeg
+python videoConverter/videoConvert.py
+```
 
-Bản Arduino tương thích với cách vận hành mẫu dùng cặp file `.mjpeg` + `.wav`, mặc định 15 fps và PCM mono 24 kHz. Hướng phát triển dài hạn vẫn là AVI chứa MJPEG + PCM để có timestamp/container thống nhất. Không khuyến nghị MP4/H.264 vì ESP32-S3 không có phần cứng giải mã H.264.
+Kết quả nằm trong `videoConverter/output_sd`: mỗi video tạo một cặp `tên.mjpeg` và `tên.wav`. Video là JPEG baseline 240 × 240, 15 fps, giữ tỷ lệ hình và đệm đen; âm thanh là WAV PCM 16-bit mono 24 kHz. Tên tệp nguồn được chuẩn hóa thành ký tự ASCII an toàn. Converter kiểm tra khung hình và thời lượng trước khi thay kết quả cũ. Xem [quy ước media](docs/MEDIA_FORMAT.md).
 
-## Tài liệu
+Chép **cả hai tệp** của mỗi cặp vào thư mục gốc thẻ microSD. Có thể dùng đầu đọc thẻ và [`scripts/sync-media.ps1`](scripts/sync-media.ps1) để chép kèm kiểm tra SHA-256; xem [hướng dẫn chuyển tệp](docs/MEDIA_TRANSFER.md). Firmware hiện chưa có chức năng tải tệp qua USB hoặc Wi‑Fi.
 
-- [Build trong VSCode hoặc PowerShell](docs/BUILD.md)
+## Sử dụng
+
+- UP/DOWN: chọn video; nhấn ngắn SELECT rồi thả: phát.
+- Giữ SELECT ít nhất 1 giây ở danh mục: mở cài đặt. Trong lúc phát, nhấn SELECT để dừng.
+- Menu cài đặt cho phép chỉnh âm lượng, tự phát sau khởi động, phát một lượt hoặc lặp, phát một video hoặc cả danh mục, và thứ tự tuần tự hoặc ngẫu nhiên. Cài đặt và tên video được chọn được lưu trong bộ nhớ bo. Xem [hướng dẫn cài đặt](docs/PLAYBACK_SETTINGS.md).
+
+## Build và tài liệu
+
+- [Build và nạp firmware](docs/BUILD.md)
 - [Báo cáo thử thiết bị COM9](docs/DEVICE_TEST_REPORT.md)
-- [Mô tả phần cứng và cấu hình GPIO](docs/HARDWARE.md)\n- [Đối chiếu hai cấu hình XiaoZhi và pinout được chọn](docs/GPIO_CROSSCHECK.md)
-- [Kiến trúc và kế hoạch phát triển](docs/VIDEO_PLAYER_PLAN.md)
-- [Quy ước media và danh sách phát](docs/MEDIA_FORMAT.md)\n- [Đánh giá dự án mẫu và nguyên nhân audio kém](docs/SAMPLE_PROJECT_REVIEW.md)\n- [Firmware Arduino cải tiến](firmware/videoPlayer/videoPlayer.ino)\n- [Cấu hình TFT_eSPI](firmware/videoPlayer/User_Setup_Xingzhi.h)\n- [Nhiệm vụ Codex: kiểm tra COM9 và nạp thử](CODEX_DEVICE_TEST_TASK.md)
+- [Phần cứng và GPIO](docs/HARDWARE.md)
+- [Đối chiếu GPIO với các biến thể bo khác](docs/GPIO_CROSSCHECK.md)
+- [Đánh giá dự án mẫu](docs/SAMPLE_PROJECT_REVIEW.md)
+- [Kế hoạch phát triển ban đầu](docs/VIDEO_PLAYER_PLAN.md)
+- [Nhiệm vụ thử thiết bị ban đầu](CODEX_DEVICE_TEST_TASK.md)
 
-## Nguồn chính
+## Nguồn tham khảo phần cứng
 
-- [Cấu hình bo xingzhi-cube-1.54tft-wifi trong xiaozhi-esp32](https://github.com/78/xiaozhi-esp32/tree/main/main/boards/nologo/xingzhi-cube-1.54tft-wifi)
-- [FAQ phần cứng của Nologo](https://www.nologo.tech/product/esp32/esp32s3/esp32s3ai/esp32s3xiaozhi/esp32s3ai_qa.html)
-- [ESP32-S3 datasheet](https://www.espressif.com/sites/default/files/documentation/esp32-s3_datasheet_en.pdf)
-- [ESP-IDF Programming Guide](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/)
+- [Cấu hình bo trong xiaozhi-esp32](https://github.com/78/xiaozhi-esp32/tree/main/main/boards/nologo/xingzhi-cube-1.54tft-wifi)
+- [FAQ phần cứng Nologo](https://www.nologo.tech/product/esp32/esp32s3/esp32s3ai/esp32s3xiaozhi/esp32s3ai_qa.html)
+- [Tài liệu ESP32-S3](https://www.espressif.com/sites/default/files/documentation/esp32-s3_datasheet_en.pdf)

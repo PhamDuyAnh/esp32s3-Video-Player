@@ -1,129 +1,35 @@
-# Quy ước media và danh sách phát
+# Định dạng media hiện dùng
 
-## 1. Cấu trúc thẻ
+Firmware `videoPlayer` hiện phát cặp tệp **MJPEG thô + WAV** trong thư mục gốc thẻ microSD. Tài liệu kế hoạch ban đầu từng đề xuất AVI trong `/videos`; phương án đó chưa được triển khai.
 
 ```text
 /
-└── videos/
-    ├── 001_intro.avi
-    ├── 002_demo.avi
-    ├── 010_outro.avi
-    └── README.txt
+├── 1.mjpeg
+├── 1.wav
+├── 2.mjpeg
+└── 2.wav
 ```
 
-Firmware chỉ quét trực tiếp `/videos` ở phiên bản đầu, không đệ quy thư mục con.
+## Video
 
-## 2. Tệp được xem là ứng viên
+- Phần mở rộng `.mjpeg` (không phân biệt chữ hoa/thường); mỗi khung là JPEG baseline 240 × 240, nối liên tiếp trong tệp, không có header tự chế ở đầu.
+- Firmware phát với nhịp cố định **15 khung/giây**; luồng MJPEG thô không mang timestamp hoặc FPS. Vì vậy video nguồn phải được chuyển đúng 15 fps trước khi chép lên thẻ.
+- Bộ đệm khung lớn nhất là 96 KiB. Converter kiểm tra các marker JPEG và từ chối khung vượt giới hạn này.
+- Khi video trễ hơn một chu kỳ khung, firmware bỏ khung để giữ tiến độ. Nếu luồng bị cắt hoặc đọc thẻ lỗi, log Serial ghi lý do kết thúc.
 
-Một directory entry chỉ được đưa vào bước kiểm tra nội dung khi:
+## Âm thanh
 
-- Là regular file, không phải thư mục.
-- Tên không bắt đầu bằng `.`.
-- Extension là `.avi`, không phân biệt hoa/thường.
-- Độ dài đường dẫn nằm trong giới hạn cấu hình.
-- Kích thước lớn hơn kích thước header tối thiểu và nhỏ hơn giới hạn filesystem.
-- Không phải file tạm như `._*`, `~*` hoặc `*.tmp`.
+- Tệp WAV phải cùng tên gốc với video, ví dụ `1.mjpeg` đi với `1.wav`.
+- Chuẩn tệp mới: RIFF/WAVE, PCM signed 16-bit little-endian, mono, **24.000 Hz**. `videoConvert.py` còn lọc và chuẩn hóa âm lượng khi chuyển mã.
+- Firmware dùng thư viện ESP32-audioI2S để đọc WAV. Một số tệp cũ trên thẻ ở 22.050 Hz vẫn đã phát được, nhưng không thuộc profile converter hiện tại.
+- Nếu thiếu WAV, video vẫn phát và log báo tệp âm thanh không có.
 
-Extension đúng chưa có nghĩa là media hợp lệ.
+## Quét thẻ và thứ tự
 
-## 3. Kiểm tra nội dung bắt buộc
+Firmware quét tối đa 50 tệp `.mjpeg` trực tiếp ở thư mục gốc, bỏ thư mục con và tên bắt đầu bằng dấu chấm. Danh sách được sắp xếp **theo chuỗi, không phân biệt hoa/thường**; ví dụ `1.mjpeg`, `10.mjpeg`, `2.mjpeg`. Nếu muốn đúng thứ tự số, đặt tiền tố đủ số chữ số như `001_`, `002_`, `010_`. Tên đã chọn được lưu để tự phát sau lần khởi động tiếp theo.
 
-Trước khi phát, parser phải xác nhận:
+Menu cho phép phát một tệp hoặc cả danh sách, một lượt hoặc lặp lại, tuần tự hoặc ngẫu nhiên. Chi tiết ở [PLAYBACK_SETTINGS.md](PLAYBACK_SETTINGS.md).
 
-- RIFF/AVI signature hợp lệ.
-- Có đúng một video stream MJPEG được hỗ trợ.
-- Kích thước frame đúng 240×240.
-- Frame rate nằm trong khoảng cho phép, đề xuất 8–15 fps ở bản đầu.
-- JPEG baseline; từ chối progressive và kích thước compressed frame vượt giới hạn.
-- Có tối đa một audio stream PCM.
-- Audio đúng PCM signed 16-bit little-endian, mono, 24.000 Hz.
-- Chunk size, offset và phép cộng không overflow.
-- Chunk không vượt quá kích thước file thực.
-- Index lỗi/thiếu phải được xử lý an toàn; bản đầu có thể yêu cầu index hợp lệ để giảm độ phức tạp.
+## Chuyển mã và chép thẻ
 
-Nếu một điều kiện không đạt: ghi log lý do, hiển thị lỗi ngắn, đóng file và chuyển sang file kế tiếp.
-
-## 4. Thứ tự phát
-
-Dùng natural sort, không phân biệt chữ hoa/thường:
-
-```text
-1_intro.avi
-2_demo.avi
-10_outro.avi
-```
-
-Không dùng thứ tự directory của FAT vì không ổn định sau khi copy/xóa file.
-
-Khóa sắp xếp đề xuất:
-
-1. So sánh từng token.
-2. Chuỗi chữ: lowercase để so sánh.
-3. Chuỗi số: so sánh theo giá trị số, không theo từ điển.
-4. Nếu bằng nhau: tên gốc làm tie-breaker.
-5. Nếu vẫn bằng: full path làm tie-breaker.
-
-Với playlist lớn, giới hạn mặc định đề xuất là 1.000 tệp. Entry vượt giới hạn bị bỏ qua và ghi log.
-
-## 5. Luật phát
-
-- Khi khởi động: mount → scan → sort → phát mục đầu.
-- Kết thúc bình thường: chuyển mục kế tiếp.
-- File lỗi: chuyển mục kế tiếp, không reboot.
-- Hết danh sách: quay lại mục đầu nếu `repeat_all=true`.
-- Next: đóng file hiện tại an toàn rồi chuyển mục kế.
-- Previous: nếu thời gian phát hiện tại > 3 giây thì phát lại file hiện tại; nếu không, về file trước.
-- Pause: giữ vị trí, ngừng I²S sạch và giữ frame hiện tại.
-- Thẻ bị tháo: dừng phát, xóa playlist, về `NO_CARD`.
-- Khi thẻ xuất hiện lại: debounce trạng thái, mount và scan lại.
-
-## 6. Tên tệp và Unicode
-
-Để bản đầu dễ kiểm chứng, khuyến nghị tên ASCII:
-
-```text
-NNN_ten-ngan.avi
-```
-
-Ví dụ: `001_sadec.avi`.
-
-FAT long filename/UTF-8 chỉ bật sau khi cấu hình FatFs và locale được kiểm thử. Không cắt chuỗi UTF-8 giữa code point khi hiển thị OSD.
-
-## 7. Quy trình chuẩn bị thẻ
-
-1. Sao lưu dữ liệu thẻ.
-2. Format FAT32 bằng công cụ phù hợp.
-3. Tạo thư mục `videos`.
-4. Chuyển mã từng video theo profile dự án.
-5. Kiểm tra bằng `ffprobe`.
-6. Copy file theo thứ tự tên.
-7. Eject an toàn.
-8. Thiết bị mount read-only.
-
-Lệnh kiểm tra ví dụ:
-
-```bash
-ffprobe -v error -show_entries \
-stream=index,codec_name,codec_type,width,height,pix_fmt,r_frame_rate,sample_rate,channels,sample_fmt \
--of default=noprint_wrappers=1 output.avi
-```
-
-Kết quả mong đợi: video `mjpeg`, 240×240, 12 fps; audio `pcm_s16le`, 24.000 Hz, mono.
-
-## 8. Bộ file kiểm thử tối thiểu
-
-- Một file hợp lệ 10 giây.
-- Một file hợp lệ ít chuyển động.
-- Một file hợp lệ chuyển động mạnh/JPEG lớn.
-- File không audio.
-- File extension đúng nhưng nội dung sai.
-- File AVI bị cắt cuối.
-- JPEG progressive.
-- Sai độ phân giải.
-- Sai sample rate/audio stereo.
-- Tên có số `1, 2, 10`.
-- Tên dài và Unicode.
-- File 0 byte.
-- Thẻ gần đầy và thẻ chậm.
-
-Không dùng dữ liệu duy nhất/chưa sao lưu để thử thao tác rút thẻ hoặc brownout.
+Đặt video nguồn trong `videoConverter/input_videos`, chạy `python videoConverter/videoConvert.py`, sau đó chép các cặp tệp từ `videoConverter/output_sd` vào thư mục gốc thẻ. Xem [README](../README.md) và [MEDIA_TRANSFER.md](MEDIA_TRANSFER.md). Chưa có chức năng tự tải tệp vào thẻ qua thiết bị.

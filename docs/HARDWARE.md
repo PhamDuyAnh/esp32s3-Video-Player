@@ -8,7 +8,10 @@ Nguồn ưu tiên:
 
 1. `config.h`, file khởi tạo bo và `power_manager.h` trong dự án [78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32/tree/main/main/boards/nologo/xingzhi-cube-1.54tft-wifi).
 2. [FAQ chính thức của Nologo](https://www.nologo.tech/product/esp32/esp32s3/esp32s3ai/esp32s3xiaozhi/esp32s3ai_qa.html).
-3. [Cấu hình xingzhi-cube của TienHuyIoT](https://github.com/TienHuyIoT/xiaozhi-esp32_vietnam/blob/develop_vn/main/boards/xingzhi-cube-1.54tft-wifi/config.h), có khai báo đầy đủ SD/TF.\n4. Tài liệu ESP32-S3 của Espressif.\n\nCấu hình [zhengchen/1.54tft-wifi](https://github.com/PhamDuyAnh/XiaoZhi-esp32/blob/main/main/boards/zhengchen/1.54tft-wifi/config.h) dùng pinout LCD/nút khác và **không áp dụng** cho target của dự án này.
+3. [Cấu hình xingzhi-cube của TienHuyIoT](https://github.com/TienHuyIoT/xiaozhi-esp32_vietnam/blob/develop_vn/main/boards/xingzhi-cube-1.54tft-wifi/config.h), có khai báo đầy đủ SD/TF.
+4. Tài liệu ESP32-S3 của Espressif.
+
+Cấu hình [zhengchen/1.54tft-wifi](https://github.com/PhamDuyAnh/XiaoZhi-esp32/blob/main/main/boards/zhengchen/1.54tft-wifi/config.h) dùng pinout LCD/nút khác và **không áp dụng** cho target của dự án này.
 
 Các chân dưới đây đã được firmware bo chính thức sử dụng. Chúng phản ánh cấu hình phần mềm hiện hành, không thay thế schematic/PCB revision của nhà sản xuất.
 
@@ -27,14 +30,17 @@ Các chân dưới đây đã được firmware bo chính thức sử dụng. Ch
 | Loa trong bộ kit | 8 Ω, 1 W | Theo FAQ Nologo |
 | Nguồn di động | Pin Li-ion/LiPo 300 mAh trong bộ kit | FAQ nêu khoảng 1,5 giờ với firmware AI + TFT; video có thể ngắn hơn |
 | USB | Nguồn, nạp firmware/USB của ESP32-S3 | Cần xác minh cổng và chế độ USB/JTAG trên revision thực tế |
-| Nút | Boot, Volume+, Volume−; nút nguồn/reset bên hông | Chức năng ứng dụng có thể ánh xạ lại |
+| Nút | SELECT/Boot, UP, DOWN | Người dùng xác nhận bo thực tế không có nút RESET riêng; reset qua USB/Serial hoặc nguồn. |
 | Thẻ TF/microSD | SPI riêng: MISO 1, MOSI 2, SCK 3, CS được sketch mẫu khai báo 46 | Dự án mẫu do người dùng cung cấp đã phát được video từ thẻ |
 
 ## 3. Bảng GPIO đã xác minh từ firmware tham chiếu
 
 | GPIO | Chức năng | Hướng/ngoại vi | Lưu ý cho dự án |
 |---:|---|---|---|
-| 0 | BOOT / nút giữa | Input, pull-up | Strapping pin; không dùng cho SD |\n| 1 | TF/SD MISO | Input, SPI | Xác nhận từ dự án mẫu hoạt động |\n| 2 | TF/SD MOSI | Output, SPI | Xác nhận từ dự án mẫu hoạt động |\n| 3 | TF/SD SCK | Output, SPI | Xác nhận từ dự án mẫu hoạt động |
+| 0 | BOOT / nút giữa | Input, pull-up | Strapping pin; không dùng cho SD |
+| 1 | TF/SD MISO | Input, SPI | Xác nhận từ dự án mẫu hoạt động |
+| 2 | TF/SD MOSI | Output, SPI | Xác nhận từ dự án mẫu hoạt động |
+| 3 | TF/SD SCK | Output, SPI | Xác nhận từ dự án mẫu hoạt động |
 | 4 | I²S microphone WS | Output | Đang dành cho microphone |
 | 5 | I²S microphone SCK | Output | Đang dành cho microphone |
 | 6 | I²S microphone DIN | Input | Dữ liệu microphone |
@@ -51,7 +57,8 @@ Các chân dưới đây đã được firmware bo chính thức sử dụng. Ch
 | 21 | Giữ nguồn/power latch | RTC output | Firmware kéo mức 1 để duy trì nguồn, mức 0 để tắt |
 | 38 | Trạng thái sạc | Input | Mức 1 được firmware hiểu là đang sạc |
 | 39 | Volume− | Input, pull-up | Có thể dùng Previous khi phát media |
-| 40 | Volume+ | Input, pull-up | Có thể dùng Next khi phát media |\n| 46 | TF/SD CS theo sketch mẫu | Cần xác minh điện | GPIO đặc biệt; không xem như output thông thường nếu chưa đo/schematic |
+| 40 | Volume+ | Input, pull-up | Có thể dùng Next khi phát media |
+| 46 | TF/SD CS theo sketch mẫu | Cần xác minh điện | GPIO đặc biệt; không xem như output thông thường nếu chưa đo/schematic |
 
 ### Cấu hình LCD
 
