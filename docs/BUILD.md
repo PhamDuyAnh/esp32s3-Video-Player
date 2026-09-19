@@ -19,4 +19,4 @@ Có thể thay `videoPlayer` bằng `selfTest` để build/nạp firmware kiểm
 
 FQBN trong script chọn ESP32-S3, flash quad 16 MB, PSRAM OPI, USB CDC và phân vùng ứng dụng 3 MB. Tùy chọn `EraseFlash=none` giữ nguyên dữ liệu khác trong flash. Không nâng cấp đồng loạt toolchain và thư viện khi chưa thử lại trên bo.
 
-Bản `videoPlayer` có menu cài đặt đã build thành công, dùng khoảng 805 KB chương trình và 54 KB RAM tĩnh; đã nạp và xác minh hash trên COM9. Kết quả đo trên thiết bị ở [DEVICE_TEST_REPORT.md](DEVICE_TEST_REPORT.md).
+Bản `videoPlayer` hiện dùng bộ phát WAV PCM/I²S riêng, build khoảng 403 KB chương trình và 42 KB RAM tĩnh; đã nạp và xác minh hash trên COM9. Thư viện ESP32-audioI2S vẫn cần cho sketch `selfTest`. Kết quả đo trên thiết bị ở [DEVICE_TEST_REPORT.md](DEVICE_TEST_REPORT.md).

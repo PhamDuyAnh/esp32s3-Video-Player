@@ -2,14 +2,17 @@
 
 Input: ``input_videos``. Output: ``output_sd`` (both beside this script).
 Each input produces raw baseline MJPEG at 240x240/15 fps and RIFF/WAVE PCM
-signed 16-bit little-endian mono at 24000 Hz. Video keeps its aspect ratio and
-uses black padding. Audio is filtered and normalized to -18 LUFS/-2 dBFS peak.
+signed 16-bit little-endian mono at 24000 Hz. --framing pad preserves the
+entire centered picture with black bars; --framing crop fills the square and
+cuts the longer dimension from the center. Audio is filtered and normalized
+to -18 LUFS/-2 dBFS peak.
 The MJPEG starts at the first JPEG marker; it has no custom FPS byte/header.
 Existing output is replaced only after both temporary outputs validate.
 """
 
 from __future__ import annotations
 
+import argparse
 import re
 import subprocess
 import wave
@@ -69,16 +72,22 @@ def inspect_wav(path: Path) -> tuple[int, float]:
         return frames, frames / TARGET_AUDIO_RATE
 
 
-def convert(source: Path) -> None:
+def video_filter_for(framing: str) -> str:
+    scale_mode = "decrease" if framing == "pad" else "increase"
+    finish = (f"pad={TARGET_WIDTH}:{TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2:black"
+              if framing == "pad" else
+              f"crop={TARGET_WIDTH}:{TARGET_HEIGHT}:(iw-ow)/2:(ih-oh)/2")
+    return (f"scale={TARGET_WIDTH}:{TARGET_HEIGHT}:"
+            f"force_original_aspect_ratio={scale_mode},{finish},fps={TARGET_FPS}")
+
+
+def convert(source: Path, framing: str) -> None:
     name = safe_name(source.stem)
     final_video, final_audio = OUTPUT_DIR / f"{name}.mjpeg", OUTPUT_DIR / f"{name}.wav"
     temp_video, temp_audio = OUTPUT_DIR / f".{name}.mjpeg.tmp", OUTPUT_DIR / f".{name}.wav.tmp"
-    video_filter = (
-        f"scale={TARGET_WIDTH}:{TARGET_HEIGHT}:force_original_aspect_ratio=decrease,"
-        f"pad={TARGET_WIDTH}:{TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2:black,fps={TARGET_FPS}"
-    )
+    video_filter = video_filter_for(framing)
     audio_filter = "highpass=f=100,lowpass=f=10500,loudnorm=I=-18:TP=-2:LRA=7"
-    print(f"\nConverting: {source.name}")
+    print(f"\nConverting: {source.name} (framing={framing})")
     try:
         run_ffmpeg([str(FFMPEG), "-hide_banner", "-y", "-i", str(source), "-an",
                     "-vf", video_filter, "-c:v", "mjpeg", "-q:v", "10",
@@ -101,6 +110,10 @@ def convert(source: Path) -> None:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Convert video to 240x240/15fps MJPEG + 24kHz mono WAV")
+    parser.add_argument("--framing", choices=("pad", "crop"), default="pad",
+                        help="pad: full image with black bars (default); crop: center crop to fill")
+    args = parser.parse_args()
     INPUT_DIR.mkdir(exist_ok=True)
     OUTPUT_DIR.mkdir(exist_ok=True)
     sources = sorted(p for p in INPUT_DIR.iterdir()
@@ -120,7 +133,7 @@ def main() -> int:
             continue
         used_names[output_name] = source
         try:
-            convert(source)
+            convert(source, args.framing)
         except Exception as error:
             failures += 1
             print(f"  ERROR: {error}")

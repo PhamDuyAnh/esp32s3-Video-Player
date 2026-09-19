@@ -15,9 +15,9 @@
 #include <TFT_eSPI.h>
 #include <JPEGDEC.h>
 #include <Preferences.h>
-#include "Audio.h"
 #include <esp_heap_caps.h>
-#include <freertos/semphr.h>
+#include <driver/i2s.h>
+#include <freertos/stream_buffer.h>
 #include "board_config.h"
 
 // Buttons
@@ -41,7 +41,7 @@ static constexpr int PIN_LCD_BACKLIGHT = board::lcd_backlight;
 static constexpr int PIN_POWER_LATCH   = board::power_latch;
 
 static constexpr uint8_t TFT_ROTATION = 4;
-static constexpr uint8_t DEFAULT_VOLUME = 6; // ESP32-audioI2S range: 0..21
+static constexpr uint8_t DEFAULT_VOLUME = 6; // PCM gain: 10 = unity, range 0..21
 static constexpr uint8_t TARGET_FPS = 15;
 static constexpr size_t MJPEG_BUFFER_SIZE = 96U * 1024U;
 static constexpr size_t MAX_FILES = 50;
@@ -51,7 +51,6 @@ static constexpr uint32_t SELECT_HOLD_MS = 1000;
 
 TFT_eSPI tft;
 JPEGDEC jpeg;
-Audio audio;
 SPIClass sdSPI(HSPI);
 Preferences preferences;
 
@@ -70,10 +69,7 @@ bool editingVolume = false;
 uint32_t autoStartAtMs = 0;
 bool playbackInterrupted = false;
 const char *playbackStopReason = "end-of-file";
-
-void audio_info(const char *message) {
-  Serial.printf("[AUDIO-LIB] %s\n", message);
-}
+enum class PlaybackResult { Completed, Interrupted, Corrupt };
 
 uint8_t *mjpegBuffer = nullptr;
 size_t bufferBegin = 0;
@@ -86,7 +82,11 @@ int selectedIndex = 0;
 volatile bool isPlaying = false;
 volatile bool audioServiceEnabled = false;
 TaskHandle_t audioTaskHandle = nullptr;
-SemaphoreHandle_t mediaMutex = nullptr;
+StreamBufferHandle_t audioStream = nullptr;
+File audioFile;
+volatile uint32_t audioDataRemaining = 0;
+volatile uint32_t audioUnderruns = 0;
+uint8_t audioReadBuffer[4096];
 uint32_t videoSdBytes = 0;
 uint32_t videoSdReadUs = 0;
 uint32_t videoSdReadCalls = 0;
@@ -151,7 +151,9 @@ SelectEvent pollSelect() {
     buttonSelect.longReported = true;
     return SelectEvent::Long;
   }
-  if (wasPressed && !isPressed && !buttonSelect.longReported) return SelectEvent::Short;
+  if (wasPressed && !isPressed) {
+    if (!buttonSelect.longReported) return SelectEvent::Short;
+  }
   return SelectEvent::None;
 }
 
@@ -180,43 +182,107 @@ void loadSettings() {
   settings.randomOrder = preferences.getBool("random", false);
 }
 
+uint32_t readLe32(const uint8_t *data) {
+  return uint32_t(data[0]) | (uint32_t(data[1]) << 8) |
+         (uint32_t(data[2]) << 16) | (uint32_t(data[3]) << 24);
+}
+
 void audioServiceTask(void *) {
+  int16_t mono[512];
+  int16_t stereo[1024];
   for (;;) {
-    if (audioServiceEnabled) {
-      if (xSemaphoreTake(mediaMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-        audio.loop();
-        xSemaphoreGive(mediaMutex);
-      }
-      vTaskDelay(pdMS_TO_TICKS(1));
-    } else {
+    if (!audioServiceEnabled) {
       vTaskDelay(pdMS_TO_TICKS(2));
+      continue;
     }
+    const size_t got = xStreamBufferReceive(audioStream, mono, sizeof(mono), pdMS_TO_TICKS(10));
+    if (got == 0) {
+      if (audioDataRemaining > 0) ++audioUnderruns;
+      continue;
+    }
+    const int volume = settings.volume;
+    for (size_t i = 0; i < got / sizeof(int16_t); ++i) {
+      const int32_t scaled = int32_t(mono[i]) * volume / 10;
+      const int16_t sample = static_cast<int16_t>(constrain(scaled, -32768, 32767));
+      stereo[2 * i] = sample;
+      stereo[2 * i + 1] = sample;
+    }
+    size_t written = 0;
+    i2s_write(I2S_NUM_1, stereo, got * 2, &written, pdMS_TO_TICKS(100));
   }
 }
 
-bool startAudio(const String &path) {
+void stopAudio() {
   audioServiceEnabled = false;
-  xSemaphoreTake(mediaMutex, portMAX_DELAY);
-  audio.stopSong();
+  delay(30);
+  if (audioFile) audioFile.close();
+  audioDataRemaining = 0;
+  xStreamBufferReset(audioStream);
+  i2s_zero_dma_buffer(I2S_NUM_1);
+}
 
-  if (!SD.exists(path.c_str())) {
+void serviceAudio() {
+  if (!audioServiceEnabled || audioDataRemaining == 0) return;
+  const size_t freeBytes = xStreamBufferSpacesAvailable(audioStream);
+  size_t wanted = min(size_t(audioDataRemaining), min(freeBytes, sizeof(audioReadBuffer)));
+  wanted &= ~size_t(1);
+  if (wanted < 2) return;
+  const size_t got = audioFile.read(audioReadBuffer, wanted);
+  if (got == 0) {
+    Serial.printf("[AUDIO] SD read failed at %u\n", static_cast<unsigned>(audioFile.position()));
+    audioDataRemaining = 0;
+    return;
+  }
+  audioDataRemaining -= got;
+  xStreamBufferSend(audioStream, audioReadBuffer, got, 0);
+}
+
+bool startAudio(const String &path) {
+  stopAudio();
+  audioFile = SD.open(path.c_str(), FILE_READ);
+  if (!audioFile) {
     Serial.printf("[AUDIO] Missing: %s\n", path.c_str());
-    xSemaphoreGive(mediaMutex);
     return false;
   }
-
-  const bool connected = audio.connecttoFS(SD, path.c_str());
-  if (!connected) {
-    Serial.printf("[AUDIO] Open failed: %s\n", path.c_str());
-    xSemaphoreGive(mediaMutex);
+  uint8_t header[12];
+  if (audioFile.read(header, sizeof(header)) != sizeof(header) ||
+      memcmp(header, "RIFF", 4) != 0 || memcmp(header + 8, "WAVE", 4) != 0) {
+    Serial.printf("[AUDIO] Invalid RIFF/WAVE: %s\n", path.c_str());
+    audioFile.close();
     return false;
   }
-
+  bool validFormat = false;
+  bool foundData = false;
+  while (audioFile.available()) {
+    uint8_t chunk[8];
+    if (audioFile.read(chunk, sizeof(chunk)) != sizeof(chunk)) break;
+    const uint32_t length = readLe32(chunk + 4);
+    const uint32_t next = audioFile.position() + length + (length & 1U);
+    if (memcmp(chunk, "fmt ", 4) == 0 && length >= 16) {
+      uint8_t format[16];
+      if (audioFile.read(format, sizeof(format)) != sizeof(format)) break;
+      validFormat = format[0] == 1 && format[1] == 0 &&
+                    format[2] == 1 && format[3] == 0 &&
+                    readLe32(format + 4) == 24000 &&
+                    format[14] == 16 && format[15] == 0;
+    } else if (memcmp(chunk, "data", 4) == 0) {
+      if (!validFormat) break;
+      audioDataRemaining = min(length, uint32_t(audioFile.size() - audioFile.position()));
+      foundData = true;
+      break;
+    }
+    if (!audioFile.seek(next)) break;
+  }
+  if (!foundData || !validFormat || audioDataRemaining == 0) {
+    Serial.printf("[AUDIO] Unsupported WAV: %s\n", path.c_str());
+    audioFile.close();
+    return false;
+  }
+  audioUnderruns = 0;
   audioServiceEnabled = true;
-  Serial.printf("[AUDIO] opened %s running=%d size=%lu pos=%lu\n", path.c_str(),
-                audio.isRunning(), static_cast<unsigned long>(audio.getFileSize()),
-                static_cast<unsigned long>(audio.getFilePos()));
-  xSemaphoreGive(mediaMutex);
+  for (int i = 0; i < 4; ++i) serviceAudio();
+  Serial.printf("[AUDIO] opened %s PCM bytes=%u\n", path.c_str(),
+                static_cast<unsigned>(audioDataRemaining));
   return true;
 }
 
@@ -236,13 +302,6 @@ bool playbackStopRequested() {
   return false;
 }
 
-void stopAudio() {
-  audioServiceEnabled = false;
-  xSemaphoreTake(mediaMutex, portMAX_DELAY);
-  audio.stopSong();
-  xSemaphoreGive(mediaMutex);
-}
-
 int jpegDraw(JPEGDRAW *draw) {
   const uint32_t started = micros();
   tft.pushImage(draw->x, draw->y, draw->iWidth, draw->iHeight, draw->pPixels);
@@ -255,18 +314,12 @@ bool refillVideoBuffer(File &file) {
     return false;
   }
 
-  // Short locked reads prevent the video core from monopolizing FAT/SPI while
-  // the audio task also reads the same SD volume.
+  // Both SD files are read by this task; the audio task only writes I2S.
   const size_t freeBytes = min(MJPEG_BUFFER_SIZE - bufferEnd, size_t(16U * 1024U));
   const uint32_t started = micros();
-  if (xSemaphoreTake(mediaMutex, pdMS_TO_TICKS(250)) != pdTRUE) {
-    Serial.println("[SD] video read mutex timeout");
-    return false;
-  }
   const size_t bytesRead = file.read(mjpegBuffer + bufferEnd, freeBytes);
   const size_t filePosition = file.position();
   const size_t fileSize = file.size();
-  xSemaphoreGive(mediaMutex);
   videoSdReadUs += micros() - started;
   videoSdBytes += bytesRead;
   ++videoSdReadCalls;
@@ -485,10 +538,6 @@ void changeSetting(int direction) {
   if (settingRow == 0 && editingVolume) {
     const int next = constrain(static_cast<int>(settings.volume) + direction, 0, 21);
     settings.volume = static_cast<uint8_t>(next);
-    if (xSemaphoreTake(mediaMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-      audio.setVolume(settings.volume);
-      xSemaphoreGive(mediaMutex);
-    }
     saveSettings();
     drawSettings();
   } else {
@@ -510,7 +559,7 @@ void selectSetting() {
   drawSettings();
 }
 
-bool playVideo(const String &videoName) {
+PlaybackResult playVideo(const String &videoName) {
   String videoPath = "/" + videoName;
   String audioPath = videoPath;
   const int extensionAt = audioPath.lastIndexOf('.');
@@ -518,21 +567,23 @@ bool playVideo(const String &videoName) {
     audioPath = audioPath.substring(0, extensionAt) + ".wav";
   }
 
+  playbackInterrupted = false;
+  playbackStopReason = "end-of-file";
+  // Read both SD files on this task. The audio task only consumes buffered PCM.
+  const bool hasAudio = playbackAudio && startAudio(audioPath);
+
   File videoFile = SD.open(videoPath.c_str(), FILE_READ);
   if (!videoFile) {
     Serial.printf("[VIDEO] Open failed: %s\n", videoPath.c_str());
-    return true; // Stop the playlist instead of retrying this file forever.
+    if (hasAudio) stopAudio();
+    return PlaybackResult::Corrupt;
   }
-
-  playbackInterrupted = false;
-  playbackStopReason = "end-of-file";
 
   videoSdBytes = 0;
   videoSdReadUs = 0;
   videoSdReadCalls = 0;
   lcdPushUs = 0;
   resetVideoReader(videoFile);
-  const bool hasAudio = playbackAudio && startAudio(audioPath);
 
   isPlaying = true;
   tft.fillScreen(TFT_BLACK);
@@ -553,6 +604,7 @@ bool playVideo(const String &videoName) {
   const uint32_t framePeriodUs = 1000000UL / playbackFps;
   uint32_t decodedFrames = 0;
   uint32_t droppedFrames = 0;
+  uint8_t consecutiveJpegFailures = 0;
   uint32_t decodeUs = 0;
   uint32_t lastLogMs = millis();
   uint32_t lastDecoded = 0;
@@ -568,11 +620,8 @@ bool playVideo(const String &videoName) {
     const uint32_t elapsed = nowMs - lastLogMs;
     if (!final && elapsed < 5000) return;
     if (elapsed == 0) return;
-    bool audioRunning = false;
-    if (hasAudio && xSemaphoreTake(mediaMutex, pdMS_TO_TICKS(20)) == pdTRUE) {
-      audioRunning = audio.isRunning();
-      xSemaphoreGive(mediaMutex);
-    }
+    const bool audioRunning = hasAudio && audioServiceEnabled &&
+                              (audioDataRemaining || xStreamBufferBytesAvailable(audioStream));
     const uint32_t dFrames = decodedFrames - lastDecoded;
     const uint32_t dDrops = droppedFrames - lastDropped;
     const uint32_t dSdBytes = videoSdBytes - lastSdBytes;
@@ -580,13 +629,14 @@ bool playVideo(const String &videoName) {
     const uint32_t dCalls = videoSdReadCalls - lastSdReadCalls;
     const uint32_t dDecodeUs = decodeUs - lastDecodeUs;
     const uint32_t dLcdUs = lcdPushUs - lastLcdUs;
-    Serial.printf("[METRIC] ms=%lu decoded=%lu dropped=%lu dropped_window=%lu fps_x100=%lu audio=%d underrun=na heap=%u psram=%u sd_KBps=%lu sd_read_us=%lu jpeg_us=%lu lcd_us=%lu%s\n",
+    Serial.printf("[METRIC] ms=%lu decoded=%lu dropped=%lu dropped_window=%lu fps_x100=%lu audio=%d underrun=%lu heap=%u psram=%u sd_KBps=%lu sd_read_us=%lu jpeg_us=%lu lcd_us=%lu%s\n",
                   static_cast<unsigned long>(nowMs),
                   static_cast<unsigned long>(decodedFrames),
                   static_cast<unsigned long>(droppedFrames),
                   static_cast<unsigned long>(dDrops),
                   static_cast<unsigned long>(dFrames * 100000UL / elapsed),
                   audioRunning,
+                  static_cast<unsigned long>(audioUnderruns),
                   heap_caps_get_free_size(MALLOC_CAP_INTERNAL), ESP.getFreePsram(),
                   static_cast<unsigned long>(static_cast<uint64_t>(dSdBytes) * 1000ULL / elapsed / 1024ULL),
                   static_cast<unsigned long>(dCalls ? dSdUs / dCalls : 0),
@@ -604,6 +654,7 @@ bool playVideo(const String &videoName) {
   };
 
   while (isPlaying) {
+    serviceAudio();
     uint8_t *frameData = nullptr;
     size_t frameSize = 0;
     if (!nextJpegFrame(videoFile, frameData, frameSize)) {
@@ -623,6 +674,7 @@ bool playVideo(const String &videoName) {
           isPlaying = false;
           break;
         }
+        serviceAudio();
         delay(1);
       }
       if (!isPlaying) {
@@ -637,9 +689,14 @@ bool playVideo(const String &videoName) {
         decodeUs += micros() - decodeStarted;
         jpeg.close();
         ++decodedFrames;
+        consecutiveJpegFailures = 0;
       } else {
         Serial.printf("[VIDEO] JPEG open failed, size=%u\n",
                       static_cast<unsigned>(frameSize));
+        if (++consecutiveJpegFailures >= 3) {
+          playbackStopReason = "jpeg-invalid";
+          break;
+        }
       }
       nextFrameAt += framePeriodUs;
     }
@@ -662,7 +719,9 @@ bool playVideo(const String &videoName) {
                 static_cast<unsigned>(fileSize),
                 static_cast<unsigned long>(decodedFrames),
                 static_cast<unsigned long>(droppedFrames));
-  return playbackInterrupted;
+  if (playbackInterrupted) return PlaybackResult::Interrupted;
+  if (strcmp(playbackStopReason, "end-of-file") != 0) return PlaybackResult::Corrupt;
+  return PlaybackResult::Completed;
 }
 
 void playPlaylist() {
@@ -695,7 +754,13 @@ void playPlaylist() {
       }
       Serial.printf("[PLAYLIST] %u/%u %s\n", static_cast<unsigned>(i + 1),
                     static_cast<unsigned>(count), fileList[order[i]].c_str());
-      if (playVideo(fileList[order[i]])) {
+      PlaybackResult result = playVideo(fileList[order[i]]);
+      if (result == PlaybackResult::Corrupt) {
+        Serial.printf("[PLAYLIST] Retry once: %s\n", fileList[order[i]].c_str());
+        delay(500);
+        result = playVideo(fileList[order[i]]);
+      }
+      if (result != PlaybackResult::Completed) {
         drawMenu();
         menuGuardUntilMs = millis() + 300;
         return;
@@ -737,16 +802,14 @@ void playAudioOnly(const String &videoName) {
   for (;;) {
     if (serialStopRequested()) { stopReason = "serial"; break; }
     if (millis() - started >= 180000) { stopReason = "duration"; break; }
-    bool running = false;
-    if (xSemaphoreTake(mediaMutex, pdMS_TO_TICKS(20)) == pdTRUE) {
-      running = audio.isRunning();
-      xSemaphoreGive(mediaMutex);
-    }
+    serviceAudio();
+    const bool running = audioDataRemaining || xStreamBufferBytesAvailable(audioStream);
     if (!running) { stopReason = "audio-not-running"; break; }
     if (millis() - lastLog >= 5000) {
       lastLog = millis();
-      Serial.printf("[METRIC] audio-only elapsed_ms=%lu running=%d underrun=na heap=%u psram=%u\n",
-                    static_cast<unsigned long>(lastLog - started), running,
+      Serial.printf("[METRIC] audio-only elapsed_ms=%lu running=%d underrun=%lu heap=%u psram=%u\n",
+                  static_cast<unsigned long>(lastLog - started), running,
+                  static_cast<unsigned long>(audioUnderruns),
                     heap_caps_get_free_size(MALLOC_CAP_INTERNAL), ESP.getFreePsram());
     }
     delay(10);
@@ -817,29 +880,37 @@ void setup() {
     }
   }
 
-  mediaMutex = xSemaphoreCreateMutex();
-  if (!mediaMutex) {
-    Serial.println("[AUDIO] Cannot create mutex");
+  audioStream = xStreamBufferCreate(32768, 1);
+  if (!audioStream) {
+    Serial.println("[AUDIO] Cannot create PCM buffer");
     while (true) delay(1000);
   }
-  Serial.printf("[AUDIO] pinout=%d volume=%u\n",
-                audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT), settings.volume);
-  audio.setVolume(settings.volume);
+  i2s_config_t audioConfig = {};
+  audioConfig.mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_TX);
+  audioConfig.sample_rate = 24000;
+  audioConfig.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
+  audioConfig.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
+  audioConfig.communication_format = I2S_COMM_FORMAT_STAND_I2S;
+  audioConfig.dma_buf_count = 8;
+  audioConfig.dma_buf_len = 240;
+  audioConfig.tx_desc_auto_clear = true;
+  i2s_pin_config_t audioPins = {};
+  audioPins.bck_io_num = I2S_BCLK;
+  audioPins.ws_io_num = I2S_LRC;
+  audioPins.data_out_num = I2S_DOUT;
+  audioPins.data_in_num = I2S_PIN_NO_CHANGE;
+  if (i2s_driver_install(I2S_NUM_1, &audioConfig, 0, nullptr) != ESP_OK ||
+      i2s_set_pin(I2S_NUM_1, &audioPins) != ESP_OK) {
+    Serial.println("[AUDIO] I2S init failed");
+    while (true) delay(1000);
+  }
 
   BaseType_t taskResult = xTaskCreatePinnedToCore(
-      audioServiceTask,
-      "audio-service",
-      8192,
-      nullptr,
-      3,
-      &audioTaskHandle,
-      0);
-
+      audioServiceTask, "audio-service", 8192, nullptr, 3,
+      &audioTaskHandle, 0);
   if (taskResult != pdPASS) {
     Serial.println("[AUDIO] Cannot create service task");
-    while (true) {
-      delay(1000);
-    }
+    while (true) delay(1000);
   }
 
   scanFiles();

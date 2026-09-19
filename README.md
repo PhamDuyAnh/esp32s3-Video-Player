@@ -6,8 +6,7 @@ Trình phát video từ thẻ microSD cho bo **xingzhi-cube-1.54tft-wifi** (ESP3
 
 - Bo COM9 đã được nhận dạng, sao lưu flash, thử LCD, nút, thẻ, loa và microphone. Firmware trình phát đã được build và nạp lên bo; xem [báo cáo thử nghiệm](docs/DEVICE_TEST_REPORT.md).
 - Menu chọn video và menu cài đặt đã được xác nhận hiển thị và thao tác được. Tác dụng của từng chế độ phát và âm lượng mới chưa được kiểm tra đầy đủ.
-- Tệp `4.mjpeg` từng được báo tự thoát sau 1–2 giây, nhưng các lần chạy lại qua Serial và nút kéo dài hơn 50 giây. Firmware hiện ghi lý do dừng và vị trí đọc file để chẩn đoán nếu lỗi lặp lại.
-- Các tệp mới tạo bằng converter vẫn nằm trên máy tính; người dùng sẽ chép lên thẻ và thử sau.
+- Lỗi tự thoát ở video 4, 7, 8 đã được tái hiện qua Serial: khi hai task cùng đọc SD, một khối MJPEG nhận nhầm dữ liệu WAV. Firmware hiện đọc cả hai tệp trên cùng task, đệm PCM cho task I2S và dừng an toàn nếu JPEG hỏng. Các lượt chuyển 4/7/8 qua Serial đạt khoảng 15 fps, audio vẫn chạy; cần thêm phản hồi nghe loa và thao tác nút thực tế.
 
 ## Chuẩn bị video và thẻ
 
@@ -15,10 +14,12 @@ Trình phát video từ thẻ microSD cho bo **xingzhi-cube-1.54tft-wifi** (ESP3
 
 ```powershell
 python -m pip install imageio-ffmpeg
-python videoConverter/videoConvert.py
+python videoConverter/videoConvert.py --framing pad
+# Hoặc lấp đầy khung vuông, cắt phần thừa ở giữa:
+python videoConverter/videoConvert.py --framing crop
 ```
 
-Kết quả nằm trong `videoConverter/output_sd`: mỗi video tạo một cặp `tên.mjpeg` và `tên.wav`. Video là JPEG baseline 240 × 240, 15 fps, giữ tỷ lệ hình và đệm đen; âm thanh là WAV PCM 16-bit mono 24 kHz. Tên tệp nguồn được chuẩn hóa thành ký tự ASCII an toàn. Converter kiểm tra khung hình và thời lượng trước khi thay kết quả cũ. Xem [quy ước media](docs/MEDIA_FORMAT.md).
+Kết quả nằm trong `videoConverter/output_sd`: mỗi video tạo một cặp `tên.mjpeg` và `tên.wav`. `--framing pad` là mặc định: giữ toàn bộ hình đúng tỷ lệ rồi đệm đen đối xứng vào cạnh thiếu. `--framing crop` phóng theo cạnh ngắn để lấp đầy khung 240 × 240 rồi cắt giữa cạnh dài. Chạy lại với chế độ khác sẽ thay cặp tệp đầu ra cùng tên. Video là JPEG baseline 240 × 240, 15 fps; âm thanh là WAV PCM 16-bit mono 24 kHz. Tên tệp nguồn được chuẩn hóa thành ký tự ASCII an toàn. Converter kiểm tra khung hình và thời lượng trước khi thay kết quả cũ. Xem [quy ước media](docs/MEDIA_FORMAT.md).
 
 Chép **cả hai tệp** của mỗi cặp vào thư mục gốc thẻ microSD. Có thể dùng đầu đọc thẻ và [`scripts/sync-media.ps1`](scripts/sync-media.ps1) để chép kèm kiểm tra SHA-256; xem [hướng dẫn chuyển tệp](docs/MEDIA_TRANSFER.md). Firmware hiện chưa có chức năng tải tệp qua USB hoặc Wi‑Fi.
 

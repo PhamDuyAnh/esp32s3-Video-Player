@@ -21,7 +21,7 @@ Firmware `videoPlayer` hiện phát cặp tệp **MJPEG thô + WAV** trong thư 
 
 - Tệp WAV phải cùng tên gốc với video, ví dụ `1.mjpeg` đi với `1.wav`.
 - Chuẩn tệp mới: RIFF/WAVE, PCM signed 16-bit little-endian, mono, **24.000 Hz**. `videoConvert.py` còn lọc và chuẩn hóa âm lượng khi chuyển mã.
-- Firmware dùng thư viện ESP32-audioI2S để đọc WAV. Một số tệp cũ trên thẻ ở 22.050 Hz vẫn đã phát được, nhưng không thuộc profile converter hiện tại.
+- Firmware đọc WAV PCM 16-bit mono 24 kHz trên cùng task với MJPEG, đệm mẫu rồi phát qua I²S. WAV 22.050 Hz cũ không còn là định dạng được hỗ trợ; hãy chuyển mã bằng `videoConvert.py`.
 - Nếu thiếu WAV, video vẫn phát và log báo tệp âm thanh không có.
 
 ## Quét thẻ và thứ tự
@@ -32,4 +32,4 @@ Menu cho phép phát một tệp hoặc cả danh sách, một lượt hoặc l�
 
 ## Chuyển mã và chép thẻ
 
-Đặt video nguồn trong `videoConverter/input_videos`, chạy `python videoConverter/videoConvert.py`, sau đó chép các cặp tệp từ `videoConverter/output_sd` vào thư mục gốc thẻ. Xem [README](../README.md) và [MEDIA_TRANSFER.md](MEDIA_TRANSFER.md). Chưa có chức năng tự tải tệp vào thẻ qua thiết bị.
+Đặt video nguồn trong `videoConverter/input_videos`, chạy `python videoConverter/videoConvert.py --framing pad` để giữ toàn khung và đệm đen, hoặc dùng `--framing crop` để lấp đầy hình vuông và cắt phần thừa từ giữa. Mặc định là `pad`; hai chế độ dùng cùng tên đầu ra nên lượt chạy sau thay kết quả trước. Sau đó chép các cặp tệp từ `videoConverter/output_sd` vào thư mục gốc thẻ. Xem [README](../README.md) và [MEDIA_TRANSFER.md](MEDIA_TRANSFER.md). Chưa có chức năng tự tải tệp vào thẻ qua thiết bị.
